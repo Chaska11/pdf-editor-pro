@@ -1,0 +1,2307 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Editor Pro - Continuous Scroll & Objek Interaktif</title>
+    <!-- Tailwind CSS untuk Desain Premium -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons untuk Ikon Modern -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF.js untuk Membaca & Merender PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <!-- PDF-Lib untuk Manipulasi Struktur PDF (Split, Merge, Edit halaman) -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- Fabric.js untuk Manipulasi Objek Vektor (Select, Drag, Resize, Delete) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+
+    <!-- Google Fonts tambahan untuk pilihan Font Family saat menambahkan Teks -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Open+Sans:wght@400;700&family=Montserrat:wght@400;700&family=Poppins:wght@400;700&family=Lato:wght@400;700&family=Playfair+Display:wght@400;700&family=Merriweather:wght@400;700&family=Oswald:wght@400;700&family=Pacifico&family=Caveat:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* FIX: Kunci viewport dokumen (html+body) agar TIDAK PERNAH ikut ter-scroll.
+           Ini penyebab utama toolbar "ikut hilang" saat pindah halaman:
+           tanpa ini, browser mencari <html> sebagai elemen scroll fallback
+           dan menggeser SELURUH halaman, bukan hanya #editor-viewport. */
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        /* Desain kustom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        
+        /* Wadah halaman PDF untuk mode Scroll */
+        .pdf-page-container {
+            position: relative;
+            background-color: #ffffff;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+            margin-bottom: 2rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .pdf-page-container.active-page-border {
+            outline: 3px solid #3b82f6;
+            box-shadow: 0 20px 25px -5px rgba(59, 130, 246, 0.3);
+        }
+        
+        .pdf-bg-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+        
+        .fabric-overlay-canvas {
+            position: relative;
+            z-index: 2;
+        }
+        
+        /* Status Tombol Aktif */
+        .tool-btn.active {
+            background-color: #2563eb;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-full flex flex-col overflow-hidden">
+
+    <!-- TOPBAR / HEADER -->
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4 z-30 shadow-md">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 p-2.5 rounded-xl text-white">
+                <i data-lucide="layers" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+                    PDF Editor Pro <span class="bg-blue-500/20 text-blue-400 text-[10px] px-2 py-0.5 rounded-full font-semibold border border-blue-500/30">Mode Scroll Aktif</span>
+                </h1>
+                <p class="text-xs text-slate-400">Pilih, Gunting, Geser, serta scroll semua halaman PDF sekaligus</p>
+            </div>
+        </div>
+
+        <!-- Tombol Aksi Dokumen -->
+        <div class="flex items-center gap-3">
+            <label class="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition flex items-center gap-2 text-sm border border-slate-700 shadow-sm">
+                <i data-lucide="file-plus" class="w-4 h-4 text-blue-400"></i>
+                Buka PDF
+                <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
+            </label>
+            
+            <!-- Dropdown Manajemen Dokumen -->
+            <div class="relative group">
+                <button class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium border border-slate-700 flex items-center gap-2">
+                    <i data-lucide="combine" class="w-4 h-4 text-indigo-400"></i> Alat Halaman
+                </button>
+                <div class="absolute right-0 mt-2 w-48 bg-slate-900 rounded-xl border border-slate-800 shadow-2xl hidden group-hover:block z-50 py-1">
+                    <button id="btn-merge-modal" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
+                        <i data-lucide="copy-plus" class="w-4 h-4 text-indigo-400"></i> Gabungkan PDF
+                    </button>
+                    <button id="btn-split" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
+                        <i data-lucide="scissors" class="w-4 h-4 text-rose-400"></i> Pisahkan (Split) PDF
+                    </button>
+                    <button id="btn-add-blank" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
+                        <i data-lucide="file" class="w-4 h-4 text-emerald-400"></i> Sisipkan Halaman Kosong
+                    </button>
+                </div>
+            </div>
+
+            <button id="btn-export" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold px-5 py-2 rounded-lg transition flex items-center gap-2 text-sm shadow-lg">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                Ekspor / Simpan PDF
+            </button>
+        </div>
+    </header>
+
+    <!-- AREA KERJA UTAMA (SIDEBAR + EDITOR KANVAS) -->
+    <main class="flex-1 flex overflow-hidden min-h-0">
+        
+        <!-- SIDEBAR KIRI: Navigasi Halaman -->
+        <aside class="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between hidden md:flex z-10 min-h-0">
+            <div class="p-4 flex-1 flex flex-col overflow-y-auto min-h-0">
+                <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Urutan Halaman</h2>
+                <div id="pages-container" class="space-y-4 flex-1">
+                    <!-- Thumbnail halaman dirender dinamis di sini -->
+                    <div class="text-center text-xs text-slate-600 py-12 italic">
+                        Belum ada file PDF yang terbuka.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel Pengaturan Halaman Aktif -->
+            <div class="p-4 border-t border-slate-800 bg-slate-950/50 space-y-3">
+                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Aksi Halaman Ini</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-rotate-page" disabled class="bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white disabled:text-slate-700 disabled:hover:bg-transparent text-xs py-2.5 rounded-lg border border-slate-800 flex flex-col items-center justify-center gap-1.5 transition">
+                        <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+                        Putar 90°
+                    </button>
+                    <button id="btn-delete-page" disabled class="bg-rose-950/20 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 disabled:text-slate-700 disabled:hover:bg-transparent text-xs py-2.5 rounded-lg border border-rose-950/30 flex flex-col items-center justify-center gap-1.5 transition">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        Hapus Halaman
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- KANVAS EDITOR (TENGAH) -->
+        <section class="flex-1 bg-slate-950 flex flex-col overflow-hidden relative min-h-0">
+            
+            <!-- PANEL SUB-MENU: NAVIGASI, ZOOM, & VIEW MODE -->
+            <div class="bg-slate-900 border-b border-slate-800 px-6 py-2 flex items-center justify-between gap-4 z-20 shrink-0">
+                <!-- Navigasi Halaman Cepat -->
+                <div class="flex items-center gap-3">
+                    <button id="btn-prev-page" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                    </button>
+                    <span class="text-sm font-semibold text-slate-300">
+                        Halaman <span id="current-page-num" class="text-white font-bold">0</span> / <span id="total-pages-num" class="text-slate-500">0</span>
+                    </span>
+                    <button id="btn-next-page" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <!-- Pilihan Mode Tampilan (View Mode) -->
+                <div class="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
+                    <button id="btn-view-single" class="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition text-slate-400 hover:text-white">
+                        <i data-lucide="file" class="w-3.5 h-3.5"></i> Tunggal
+                    </button>
+                    <button id="btn-view-scroll" class="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition bg-blue-600 text-white shadow-md">
+                        <i data-lucide="mouse-pointer-scroll" class="w-3.5 h-3.5"></i> Scroll Vertikal
+                    </button>
+                </div>
+
+                <!-- Kontrol Zoom -->
+                <div class="flex items-center gap-3">
+                    <button id="btn-zoom-out" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="zoom-out" class="w-5 h-5"></i>
+                    </button>
+                    <span id="zoom-percent" class="text-xs text-slate-400 font-mono w-12 text-center bg-slate-950 px-2 py-1 rounded border border-slate-850">100%</span>
+                    <button id="btn-zoom-in" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="zoom-in" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- KONTROLLER TOOLS TETAP DI ATAS (STICKY BAR DENGAN Z-INDEX MAKSIMAL) -->
+            <div class="w-full flex justify-center py-3 bg-slate-900/60 border-b border-slate-800/80 backdrop-blur-md z-20 shadow-lg shrink-0">
+                <div class="bg-slate-900/95 px-4 py-2.5 rounded-full border border-slate-750 shadow-xl flex items-center gap-1 md:gap-2">
+                    <!-- TOMBOL UNDO / REDO -->
+                    <button id="btn-undo" disabled title="Batal Aksi (Undo) - Ctrl + Z" class="p-2 rounded-full hover:bg-slate-800 text-slate-500 hover:text-white disabled:text-slate-700 disabled:hover:bg-transparent transition">
+                        <i data-lucide="undo" class="w-4.5 h-4.5"></i>
+                    </button>
+                    <button id="btn-redo" disabled title="Ulang Aksi (Redo) - Ctrl + Y" class="p-2 rounded-full hover:bg-slate-800 text-slate-500 hover:text-white disabled:text-slate-700 disabled:hover:bg-transparent transition">
+                        <i data-lucide="redo" class="w-4.5 h-4.5"></i>
+                    </button>
+
+                    <div class="h-5 w-px bg-slate-800 mx-1"></div>
+
+                    <!-- ALAT UTAMA: CROP & GESER ELEMEN ASLI PDF -->
+                    <button id="tool-cropmove" title="Gunting & Geser Elemen Asli PDF" class="p-2 rounded-full hover:bg-blue-900/30 text-amber-400 hover:text-amber-300 border border-amber-500/25 transition">
+                        <i data-lucide="scissors-square-dashed-bottom" class="w-5 h-5"></i>
+                    </button>
+
+                    <div class="h-5 w-px bg-slate-850 mx-1"></div>
+
+                    <!-- Selector / Drag Tool (PILIH OBJEK EDITOR) -->
+                    <button id="tool-select" title="Pilih & Geser Objek" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="pointer" class="w-5 h-5"></i>
+                    </button>
+                    
+                    <!-- Pen Tool -->
+                    <button id="tool-pen" title="Coret / Gambar Bebas" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="pencil" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Highlighter -->
+                    <button id="tool-highlighter" title="Stabilo (Transparan)" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="highlighter" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Text Tool -->
+                    <button id="tool-text" title="Tambahkan Teks Baru" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="case-sensitive" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Edit Teks Asli PDF: klik baris teks yang sudah ada di PDF untuk mengeditnya langsung -->
+                    <button id="tool-edit-text" title="Edit Teks Asli PDF (klik baris teks yang ingin diubah)" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="text-cursor-input" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Shape Tools Dropdown: Kotak, Oval, Lingkaran, Garis -->
+                    <div class="relative group">
+                        <button id="tool-shapes" title="Alat Bentuk: Kotak / Oval / Lingkaran / Garis" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                            <i data-lucide="square" class="w-5 h-5"></i>
+                        </button>
+                        <div class="hidden group-hover:flex flex-col gap-1 absolute top-10 left-1/2 -translate-x-1/2 bg-slate-900 p-2 rounded-xl border border-slate-800 shadow-2xl z-30 w-40">
+                            <button onclick="setActiveTool('rect')" class="flex items-center gap-2 hover:bg-slate-800 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition">
+                                <i data-lucide="square" class="w-4 h-4"></i> Kotak
+                            </button>
+                            <button onclick="setActiveTool('oval')" class="flex items-center gap-2 hover:bg-slate-800 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition">
+                                <i data-lucide="circle" class="w-4 h-4"></i> Oval
+                            </button>
+                            <button onclick="setActiveTool('circle')" class="flex items-center gap-2 hover:bg-slate-800 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition">
+                                <i data-lucide="circle" class="w-4 h-4"></i> Lingkaran
+                            </button>
+                            <button onclick="setActiveTool('line')" class="flex items-center gap-2 hover:bg-slate-800 text-slate-300 hover:text-white text-xs px-3 py-2 rounded-lg transition">
+                                <i data-lucide="minus" class="w-4 h-4"></i> Garis
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Ketebalan Garis: sengaja ditaruh nempel di samping tombol Bentuk
+                         (bukan digabung dengan Ukuran Font) supaya tidak ketuker saat
+                         memilih. Kontrol ini juga tetap berlaku untuk Pen & Stabilo. -->
+                    <select id="stroke-width" class="bg-slate-800 border border-slate-750 text-slate-200 rounded-lg text-xs px-2 py-1 focus:outline-none w-16" title="Ketebalan Garis (Pen / Stabilo / Bentuk)">
+                        <option value="1">1 px</option>
+                        <option value="2">2 px</option>
+                        <option value="3">3 px</option>
+                        <option value="4" selected>4 px</option>
+                        <option value="6">6 px</option>
+                        <option value="8">8 px</option>
+                        <option value="10">10 px</option>
+                        <option value="12">12 px</option>
+                        <option value="16">16 px</option>
+                        <option value="20">20 px</option>
+                        <option value="24">24 px</option>
+                    </select>
+
+                    <!-- Whiteout (Penghapus Latar/Teks Asli) -->
+                    <button id="tool-whiteout" title="Whiteout (Hapus Latar PDF)" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="eraser" class="w-5 h-5 text-rose-400"></i>
+                    </button>
+                    <!-- Signature Tool -->
+                    <button id="tool-signature" title="Tambahkan Tanda Tangan" class="tool-btn p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition">
+                        <i data-lucide="signature" class="w-5 h-5 text-emerald-400"></i>
+                    </button>
+
+                    <!-- Custom Symbol Dropdown -->
+                    <div class="relative group">
+                        <button id="tool-symbols" title="Sisipkan Simbol Cepat" class="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition flex items-center justify-center">
+                            <i data-lucide="smile" class="w-5 h-5 text-blue-400"></i>
+                        </button>
+                        <div class="hidden group-hover:grid grid-cols-4 gap-2 absolute top-10 left-1/2 -translate-x-1/2 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-2xl z-30 w-36">
+                            <button onclick="insertSymbol('✔', '#22c55e')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-emerald-500">✔</button>
+                            <button onclick="insertSymbol('✘', '#ef4444')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-red-500">✘</button>
+                            <button onclick="insertSymbol('➔', '#3b82f6')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-blue-500">➔</button>
+                            <button onclick="insertSymbol('★', '#eab308')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-yellow-500">★</button>
+                            <button onclick="insertSymbol('●', '#ef4444')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-red-500">●</button>
+                            <button onclick="insertSymbol('■', '#000000')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-slate-400">■</button>
+                            <button onclick="insertSymbol('▲', '#3b82f6')" class="text-lg hover:bg-slate-800 p-1 rounded transition text-blue-500">▲</button>
+                            <button onclick="insertSymbol('❓', '#a855f7')" class="text-lg hover:bg-slate-800 p-1 rounded transition">❓</button>
+                        </div>
+                    </div>
+                    
+                    <div class="h-5 w-px bg-slate-800 mx-1"></div>
+
+                    <!-- Customizer (Warna, Font, & Ukuran Objek) -->
+                    <div class="flex items-center gap-2">
+                        <!-- Color Picker Bulat -->
+                        <div class="relative group">
+                            <button id="color-indicator" class="w-6 h-6 rounded-full border border-white/40 bg-red-500 shadow-inner" title="Warna Objek"></button>
+                            <div class="hidden group-hover:grid grid-cols-4 gap-2 absolute top-8 left-1/2 -translate-x-1/2 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-2xl z-30 w-32">
+                                <button onclick="setGlobalColor('#ef4444')" class="w-5 h-5 rounded-full bg-red-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#3b82f6')" class="w-5 h-5 rounded-full bg-blue-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#22c55e')" class="w-5 h-5 rounded-full bg-green-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#eab308')" class="w-5 h-5 rounded-full bg-yellow-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#a855f7')" class="w-5 h-5 rounded-full bg-purple-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#f97316')" class="w-5 h-5 rounded-full bg-orange-500 hover:scale-110 transition"></button>
+                                <button onclick="setGlobalColor('#000000')" class="w-5 h-5 rounded-full bg-black hover:scale-110 transition border border-slate-800"></button>
+                                <button onclick="setGlobalColor('#ffffff')" class="w-5 h-5 rounded-full bg-white hover:scale-110 transition border border-slate-300"></button>
+                            </div>
+                        </div>
+
+                        <!-- Dropdown Font Family -->
+                        <select id="font-family-selector" class="bg-slate-800 border border-slate-750 text-slate-200 rounded-lg text-xs px-2 py-1 focus:outline-none w-32" title="Jenis Huruf">
+                            <optgroup label="Font Sistem">
+                                <option value="Arial, sans-serif">Arial</option>
+                                <option value="Helvetica, sans-serif">Helvetica</option>
+                                <option value="'Times New Roman', serif">Times New Roman</option>
+                                <option value="Georgia, serif">Georgia</option>
+                                <option value="'Courier New', monospace">Courier New</option>
+                                <option value="Verdana, sans-serif">Verdana</option>
+                                <option value="Tahoma, sans-serif">Tahoma</option>
+                                <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+                                <option value="Garamond, serif">Garamond</option>
+                                <option value="'Palatino Linotype', serif">Palatino</option>
+                                <option value="Impact, sans-serif">Impact</option>
+                                <option value="'Comic Sans MS', cursive">Comic Sans MS</option>
+                            </optgroup>
+                            <optgroup label="Google Fonts">
+                                <option value="'Roboto', sans-serif">Roboto</option>
+                                <option value="'Open Sans', sans-serif">Open Sans</option>
+                                <option value="'Montserrat', sans-serif">Montserrat</option>
+                                <option value="'Poppins', sans-serif">Poppins</option>
+                                <option value="'Lato', sans-serif">Lato</option>
+                                <option value="'Oswald', sans-serif">Oswald</option>
+                                <option value="'Playfair Display', serif">Playfair Display</option>
+                                <option value="'Merriweather', serif">Merriweather</option>
+                                <option value="'Pacifico', cursive">Pacifico (Script)</option>
+                                <option value="'Caveat', cursive">Caveat (Tulisan Tangan)</option>
+                            </optgroup>
+                        </select>
+
+                        <!-- Ukuran Font (Angka) -->
+                        <select id="font-size" class="bg-slate-800 border border-slate-750 text-slate-200 rounded-lg text-xs px-2 py-1 focus:outline-none w-16" title="Ukuran Font">
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                            <option value="11">11</option>
+                            <option value="12">12</option>
+                            <option value="14">14</option>
+                            <option value="16">16</option>
+                            <option value="18">18</option>
+                            <option value="20" selected>20</option>
+                            <option value="24">24</option>
+                            <option value="28">28</option>
+                            <option value="32">32</option>
+                            <option value="36">36</option>
+                            <option value="40">40</option>
+                            <option value="48">48</option>
+                            <option value="56">56</option>
+                            <option value="64">64</option>
+                            <option value="72">72</option>
+                            <option value="96">96</option>
+                        </select>
+
+                        <button id="btn-delete-selected" title="Hapus Objek Terpilih" class="p-2 rounded-full hover:bg-rose-950 text-rose-500 hover:text-rose-400 transition">
+                            <i data-lucide="trash" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AREA VIEWPORT KANVAS RENDERING (MENDUKUNG SCROLL VERTIKAL) -->
+            <div id="editor-viewport" class="flex-1 min-h-0 overflow-auto p-12 flex flex-col items-center justify-start scroll-smooth z-10">
+                <!-- Tampilan Awal: Belum Buka Berkas -->
+                <div id="welcome-state" class="text-center max-w-lg p-8 bg-slate-900 rounded-2xl border border-slate-800/80 shadow-2xl space-y-5 my-auto">
+                    <div class="mx-auto w-16 h-16 bg-blue-600/10 text-blue-500 rounded-2xl flex items-center justify-center border border-blue-500/20">
+                        <i data-lucide="file-text" class="w-8 h-8"></i>
+                    </div>
+                    <div class="space-y-2">
+                        <h3 class="text-xl font-bold text-white">Buat atau Buka Dokumen PDF</h3>
+                        <p class="text-sm text-slate-400 leading-relaxed">
+                            Mulai dengan mengunggah PDF Anda. Nikmati kemudahan navigasi dengan <span class="text-blue-400 font-semibold">Mode Scroll Vertikal</span> untuk membaca dokumen panjang secara mulus!
+                        </p>
+                    </div>
+                    <div class="flex items-center justify-center gap-3">
+                        <label class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-3 rounded-xl cursor-pointer transition shadow-lg text-sm">
+                            Buka Berkas PDF
+                            <input type="file" id="pdf-file-input-welcome" accept="application/pdf" class="hidden">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Kontainer Utama Tempat Semua Halaman PDF Dirender Secara Vertikal -->
+                <div id="scroll-workspace" class="hidden w-full flex flex-col items-center py-8">
+                    <!-- Halaman-halaman PDF akan disisipkan di sini secara dinamis -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- MODAL 1: BUAT TANDA TANGAN -->
+    <div id="signature-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="signature" class="text-blue-500"></i> Lukis Tanda Tangan
+                </h3>
+                <button onclick="closeSignatureModal()" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <p class="text-xs text-slate-400">Goreskan tanda tangan Anda pada bidang putih di bawah menggunakan mouse atau layar sentuh.</p>
+
+            <div class="bg-white rounded-xl overflow-hidden border border-slate-800">
+                <canvas id="sig-pad" class="w-full h-48 bg-white cursor-crosshair"></canvas>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 pt-2">
+                <button onclick="clearSignaturePad()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-4 py-2 rounded-lg transition font-medium">
+                    Bersihkan
+                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="closeSignatureModal()" class="bg-slate-950 text-slate-400 text-xs px-4 py-2 rounded-lg transition">
+                        Batal
+                    </button>
+                    <button onclick="saveSignature()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2.5 rounded-lg transition font-bold">
+                        Tempelkan Tanda Tangan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: GABUNGAN FILE (MERGE) -->
+    <div id="merge-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="copy-plus" class="text-indigo-400"></i> Gabungkan Koleksi PDF
+                </h3>
+                <button id="btn-close-merge" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-400">Unggah dua atau lebih file PDF di bawah ini. Anda dapat menghapus salah satu sebelum mulai menyatukannya.</p>
+
+            <!-- File List -->
+            <div id="merge-files-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                <div class="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
+                    Belum ada file terpilih.
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs py-3 rounded-xl text-center cursor-pointer transition flex items-center justify-center gap-2 border border-slate-750 font-semibold">
+                    <i data-lucide="plus" class="w-4 h-4"></i> Pilih Berkas PDF tambahan
+                    <input type="file" id="merge-file-picker" accept="application/pdf" multiple class="hidden">
+                </label>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                <button id="btn-cancel-merge" class="bg-slate-950 text-slate-400 text-xs px-4 py-2.5 rounded-lg transition">
+                    Batal
+                </button>
+                <button id="btn-run-merge" disabled class="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white text-xs px-5 py-2.5 rounded-lg transition font-bold flex items-center gap-2 shadow-lg">
+                    Mulai Gabungkan PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-message" class="fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-white px-5 py-3.5 rounded-xl shadow-2xl z-50 flex items-center gap-3 transform translate-y-20 opacity-0 transition duration-300 pointer-events-none">
+        <div id="toast-icon" class="text-blue-500">
+            <i data-lucide="info" class="w-5 h-5"></i>
+        </div>
+        <p id="toast-text" class="text-xs font-semibold"></p>
+    </div>
+
+    <!-- CODE LOGIC UTAMA -->
+    <script>
+        // Set worker pdf.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        // FIX: dibatasi maksimal 2x. Device dengan devicePixelRatio 3 (banyak HP Android)
+        // kalau dipakai penuh akan membuat gambar hasil crop jadi sangat besar
+        // (resolusi kali lipat dari kuadrat rasio ini), yang bikin data base64
+        // gambar bengkak dan berisiko membuat proses export PDF gagal/macet.
+        // 2x sudah cukup tajam untuk kebutuhan tampilan & cetak dokumen biasa.
+        const RENDER_DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+        // State Manager Aplikasi
+        let pdfDataBytes = null;       // Uint8Array dari PDF asli
+        let pdfDocInstance = null;     // Objek pdf.js
+        let currentPageNum = 1;        // Halaman aktif
+        let totalPages = 0;            // Total Halaman
+        let currentZoom = 1.0;         // Skala pembesaran
+        let rotationStates = {};       // Putaran halaman (halaman -> derajat)
+        let deletedPages = new Set();  // Menyimpan halaman yang dihapus oleh user
+        
+        let activeTool = 'select';     // Tool bawaan default
+        let globalColor = '#ef4444';   // Default warna merah
+        let strokeWidth = 4;           // Default ketebalan garis (pen/highlighter/shapes)
+        let fontSize = 20;             // Default ukuran font (angka px)
+        let selectedFontFamily = 'Arial, sans-serif'; // Default font family
+        
+        let viewMode = 'scroll';       // View mode default: 'scroll' atau 'single'
+
+        // Referensi objek "page" & "viewport" pdf.js per halaman -- dibutuhkan untuk
+        // render ulang resolusi tinggi saat Crop & Move, dan untuk ekstraksi teks asli
+        // pada fitur "Edit Teks PDF".
+        let pdfPageProxies = {};
+        let pdfPageViewports = {};
+
+        // Cache baris teks asli PDF (hasil pengelompokan text items per baris) untuk
+        // fitur "Edit Teks PDF", dan penanda baris mana yang sudah dikonversi jadi
+        // kotak teks yang bisa diedit (supaya tidak dobel kalau diklik lagi).
+        let pageTextLinesCache = {};
+        let convertedTextLines = {};
+        
+        // Objek Cache untuk menyimpan Coretan/Objek Fabric.js per halaman (halaman -> JSON State)
+        let pageObjectsCache = {};
+
+        // SISTEM UNDO & REDO STATE (Page -> Stack)
+        let pageUndoStacks = {};       // Menyimpan tumpukan histori halaman (Page -> Array)
+        let pageRedoStacks = {};       // Menyimpan tumpukan redo halaman (Page -> Array)
+        let isRespondingToStateChange = false; // Mencegah loop penyimpanan state
+
+        // Penampung referensi objek-objek Canvas Fabric aktif per halaman
+        let activeFabricCanvases = {};
+
+        // Canvas yang saat ini sedang diedit/dipilih oleh user secara aktif
+        let fCanvas = null;
+
+        // FIX FONT: <link> Google Fonts di <head> cuma MEMESAN font, bukan
+        // menjamin sudah selesai dimuat saat script ini jalan. Kalau user
+        // menambahkan teks dengan Google Font sebelum font-nya benar-benar
+        // siap, canvas akan menampilkan font fallback sampai ada re-render.
+        // document.fonts.ready memastikan begitu semua font di <head> selesai
+        // dimuat, semua canvas yang sudah ada langsung digambar ulang dengan
+        // font yang benar.
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(() => {
+                Object.values(activeFabricCanvases).forEach(c => c.renderAll());
+            });
+        }
+
+        // Pointer Tanda Tangan (Signature Pad)
+        const sigPad = document.getElementById('sig-pad');
+        const ctxSig = sigPad.getContext('2d');
+        let drawingSig = false;
+
+        // Dom Elements
+        const pdfFileInput = document.getElementById('pdf-file-input');
+        const pdfFileInputWelcome = document.getElementById('pdf-file-input-welcome');
+        const welcomeState = document.getElementById('welcome-state');
+        const scrollWorkspace = document.getElementById('scroll-workspace');
+        const editorViewport = document.getElementById('editor-viewport');
+
+        // Hubungkan Input File
+        pdfFileInput.addEventListener('change', handleFileSelect);
+        pdfFileInputWelcome.addEventListener('change', handleFileSelect);
+
+        // Toast Alert System
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast-message');
+            const icon = document.getElementById('toast-icon');
+            const text = document.getElementById('toast-text');
+            text.innerText = message;
+
+            if (type === 'success') {
+                icon.innerHTML = '<i data-lucide="check-circle" class="text-emerald-500 w-5 h-5"></i>';
+            } else if (type === 'error') {
+                icon.innerHTML = '<i data-lucide="alert-triangle" class="text-rose-500 w-5 h-5"></i>';
+            } else {
+                icon.innerHTML = '<i data-lucide="info" class="text-blue-500 w-5 h-5"></i>';
+            }
+            lucide.createIcons();
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // Buka Berkas PDF
+        async function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            showToast("Membuka PDF...", "info");
+            const reader = new FileReader();
+            reader.onload = async function() {
+                pdfDataBytes = new Uint8Array(this.result);
+                await loadPdfDocument();
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Proses Memuat Dokumen PDF
+        async function loadPdfDocument() {
+            try {
+                // FIX PENTING: pdf.js men-transfer (bukan menyalin) ArrayBuffer di
+                // dalam Uint8Array ke Web Worker-nya untuk efisiensi. Efek
+                // sampingnya, `pdfDataBytes` ASLI jadi kosong/rusak setelah baris
+                // ini (buffer-nya "detached"). Kalau pdfDataBytes langsung dikasih
+                // di sini, nanti pas export/save PDF-Lib mencoba baca ulang
+                // pdfDataBytes, hasilnya rusak -> "No PDF header found".
+                // Solusinya: selalu kasih ke pdf.js SALINAN datanya (.slice()),
+                // bukan reference aslinya, supaya pdfDataBytes tetap utuh.
+                const loadingTask = pdfjsLib.getDocument({ data: pdfDataBytes.slice() });
+                pdfDocInstance = await loadingTask.promise;
+                
+                totalPages = pdfDocInstance.numPages;
+                currentPageNum = 1;
+                rotationStates = {};
+                deletedPages = new Set();
+                pageObjectsCache = {};
+                pageUndoStacks = {};
+                pageRedoStacks = {};
+                
+                // Bersihkan fabric instances yang lama
+                Object.values(activeFabricCanvases).forEach(c => c.dispose());
+                activeFabricCanvases = {};
+
+                welcomeState.classList.add('hidden');
+                scrollWorkspace.classList.remove('hidden');
+
+                // Aktifkan Kontrol
+                document.getElementById('btn-export').removeAttribute('disabled');
+                document.getElementById('btn-rotate-page').removeAttribute('disabled');
+                document.getElementById('btn-delete-page').removeAttribute('disabled');
+                document.getElementById('total-pages-num').innerText = totalPages;
+
+                await renderAllPages();
+                generateSidebarThumbnails();
+                
+                showToast("PDF siap diedit!", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Berkas gagal dimuat. Pastikan itu file PDF valid.", "error");
+            }
+        }
+
+        // RENDER SEMUA HALAMAN SECARA VERTIKAL (CONTINUOUS SCROLL / SINGLE-PAGE SINKRON)
+        async function renderAllPages() {
+            if (!pdfDocInstance) return;
+            
+            // Simpan posisi scroll sebelum render
+            const scrollPos = editorViewport.scrollTop;
+
+            scrollWorkspace.innerHTML = ''; // Bersihkan container workspace
+
+            // Reset cache posisi teks (posisinya berubah tiap kali zoom/rotasi berubah)
+            pageTextLinesCache = {};
+            convertedTextLines = {};
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (deletedPages.has(i)) continue;
+
+                // Skip halaman lain jika berada dalam mode single-page tunggal
+                if (viewMode === 'single' && i !== currentPageNum) {
+                    continue;
+                }
+
+                // Buat kontainer halaman pembungkus
+                const pageContainer = document.createElement('div');
+                pageContainer.className = `pdf-page-container ${i === currentPageNum ? 'active-page-border' : ''}`;
+                pageContainer.id = `page-wrapper-${i}`;
+                pageContainer.dataset.pageNum = i;
+
+                // Ambil halaman asli PDF
+                const page = await pdfDocInstance.getPage(i);
+                const rot = rotationStates[i] || 0;
+                const viewport = page.getViewport({ scale: currentZoom, rotation: rot });
+
+                // Simpan referensi untuk dipakai fitur Crop resolusi tinggi & Edit Teks PDF
+                pdfPageProxies[i] = page;
+                pdfPageViewports[i] = viewport;
+
+                pageContainer.style.width = `${viewport.width}px`;
+                pageContainer.style.height = `${viewport.height}px`;
+
+                // Buat canvas latar belakang PDF asli
+                // FIX BURAM: render pada resolusi devicePixelRatio (dibatasi max 2x,
+                // lihat RENDER_DPR) agar tajam di layar Retina/high-DPI. Ukuran
+                // TAMPILAN (CSS) tetap sama, hanya resolusi bitmap di dalamnya yang
+                // diperbesar, lalu PDF.js diberi tahu lewat parameter `transform`
+                // supaya konten digambar mengisi resolusi itu.
+                const dpr = RENDER_DPR;
+                const bgCanvas = document.createElement('canvas');
+                bgCanvas.className = 'pdf-bg-canvas';
+                bgCanvas.width = viewport.width * dpr;
+                bgCanvas.height = viewport.height * dpr;
+                bgCanvas.style.width = `${viewport.width}px`;
+                bgCanvas.style.height = `${viewport.height}px`;
+                bgCanvas.dataset.dpr = dpr;
+                
+                // Buat canvas overlay interaktif Fabric.js
+                const overlayCanvas = document.createElement('canvas');
+                overlayCanvas.className = 'fabric-overlay-canvas';
+                overlayCanvas.id = `fabric-canvas-${i}`;
+
+                pageContainer.appendChild(bgCanvas);
+                pageContainer.appendChild(overlayCanvas);
+                scrollWorkspace.appendChild(pageContainer);
+
+                // Render visual halaman asli PDF (di-scale ke resolusi devicePixelRatio)
+                const renderContext = {
+                    canvasContext: bgCanvas.getContext('2d'),
+                    viewport: viewport,
+                    transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined
+                };
+                await page.render(renderContext).promise;
+
+                // Inisialisasi Fabric Canvas untuk halaman ini
+                const fPageCanvas = new fabric.Canvas(`fabric-canvas-${i}`, {
+                    width: viewport.width,
+                    height: viewport.height,
+                    selection: true,
+                    preserveObjectStacking: true
+                });
+
+                // Simpan referensi canvas ke map aktif
+                activeFabricCanvases[i] = fPageCanvas;
+
+                // FIX GULIR MOUSE: Terjemahkan perputaran roda mouse di atas canvas Fabric menjadi pergeseran scroll kontainer
+                fPageCanvas.on('mouse:wheel', function(opt) {
+                    const delta = opt.e.deltaY;
+                    editorViewport.scrollTop += delta;
+                    opt.e.preventDefault();
+                    opt.e.stopPropagation();
+                });
+
+                // Hubungkan event-event Fabric untuk manajemen Undo-Redo & Sync Cache
+                fPageCanvas.on('path:created', function(e) {
+                    if (activeTool === 'highlighter') {
+                        // FIX: sebelumnya opacity 0.45 ditumpuk LAGI di atas warna
+                        // brush yang sudah punya alpha 0.45 sendiri (hexToRgbA),
+                        // hasilnya jadi dobel transparan (~0.2) dan tidak konsisten.
+                        // Sekarang transparansi cukup dari warna brush saja, dan kita
+                        // tambahkan mode "multiply" supaya blending-nya terlihat
+                        // seperti stabilo asli menembus di atas teks, bukan sekadar
+                        // garis pudar seperti pen.
+                        e.path.set({
+                            opacity: 1,
+                            globalCompositeOperation: 'multiply'
+                        });
+                        fPageCanvas.renderAll();
+                    }
+                    saveStateToHistory(i, fPageCanvas);
+                });
+
+                fPageCanvas.on('object:modified', () => saveStateToHistory(i, fPageCanvas));
+                fPageCanvas.on('object:added', () => saveStateToHistory(i, fPageCanvas));
+                fPageCanvas.on('object:removed', () => saveStateToHistory(i, fPageCanvas));
+
+                // Deteksi klik pada halaman untuk mengaktifkan fCanvas utama
+                fPageCanvas.on('mouse:down', () => {
+                    setActivePage(i);
+                });
+
+                // Muat objek tersimpan dari cache jika ada
+                if (pageObjectsCache[i]) {
+                    isRespondingToStateChange = true;
+                    fPageCanvas.loadFromJSON(pageObjectsCache[i], () => {
+                        fPageCanvas.renderAll();
+                        isRespondingToStateChange = false;
+                        
+                        if (!pageUndoStacks[i]) {
+                            pageUndoStacks[i] = [JSON.stringify(fPageCanvas.toJSON())];
+                            pageRedoStacks[i] = [];
+                        }
+                    });
+                } else {
+                    if (!pageUndoStacks[i]) {
+                        pageUndoStacks[i] = [JSON.stringify(fPageCanvas.toJSON())];
+                        pageRedoStacks[i] = [];
+                    }
+                }
+            }
+
+            // Kembalikan posisi scroll viewport jika dalam mode scroll
+            if (viewMode === 'scroll') {
+                editorViewport.scrollTop = scrollPos;
+            }
+
+            // Atur halaman aktif utama
+            setActivePage(currentPageNum);
+            setupScrollSpy(); // Aktifkan pendeteksi halaman aktif berdasarkan scroll
+        }
+
+        // FIX: Gulirkan HANYA di dalam #editor-viewport, tidak pernah menyentuh
+        // scroll window/document. Menggantikan el.scrollIntoView() bawaan yang
+        // rawan ikut menggeser ancestor lain (termasuk toolbar) jika ada
+        // ketidaksesuaian tinggi container akibat flexbox.
+        function scrollPageIntoView(el) {
+            if (!el) return;
+            const elRect = el.getBoundingClientRect();
+            const viewportRect = editorViewport.getBoundingClientRect();
+            // Posisi elemen relatif terhadap konten yang sudah discroll saat ini
+            const elTopWithinContent = (elRect.top - viewportRect.top) + editorViewport.scrollTop;
+            const targetTop = elTopWithinContent - (editorViewport.clientHeight / 2) + (elRect.height / 2);
+            editorViewport.scrollTo({
+                top: Math.max(0, targetTop),
+                behavior: 'smooth'
+            });
+        }
+
+        // ================== FITUR: EDIT TEKS ASLI PDF ==================
+        // Mengambil semua "text item" dari PDF.js untuk satu halaman, lalu
+        // mengelompokkannya jadi baris-baris (karena PDF.js biasanya memecah satu
+        // baris kalimat jadi beberapa potongan/item kecil per kata atau per gaya
+        // huruf). Hasilnya baru dihitung sekali per halaman lalu di-cache, supaya
+        // klik berikutnya tidak perlu re-ekstraksi dari awal.
+        async function getPageTextLines(pageNum) {
+            if (pageTextLinesCache[pageNum]) return pageTextLinesCache[pageNum];
+
+            const page = pdfPageProxies[pageNum];
+            const viewport = pdfPageViewports[pageNum];
+            if (!page || !viewport) return [];
+
+            const textContent = await page.getTextContent();
+
+            // Hitung bounding box tiap item teks dalam satuan px kanvas (CSS px),
+            // memakai kombinasi transform milik item & viewport halaman -- ini
+            // rumus baku yang sama dipakai PDF.js sendiri untuk text-layer-nya.
+            const itemBoxes = textContent.items
+                .filter(item => item.str && item.str.trim().length > 0)
+                .map(item => {
+                    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                    const fontHeight = Math.hypot(tx[2], tx[3]);
+                    const widthPx = item.width * Math.hypot(tx[0], tx[1]);
+                    return {
+                        text: item.str,
+                        left: tx[4],
+                        baseline: tx[5],
+                        top: tx[5] - fontHeight,
+                        width: widthPx,
+                        height: fontHeight
+                    };
+                });
+
+            // Kelompokkan item-item yang baseline-nya berdekatan (dianggap satu
+            // baris yang sama), lalu urutkan dari kiri ke kanan dan gabungkan
+            // teksnya jadi satu baris utuh yang bisa diedit sekaligus.
+            const LINE_TOLERANCE_PX = 3;
+            const sorted = [...itemBoxes].sort((a, b) => a.baseline - b.baseline || a.left - b.left);
+            const lines = [];
+
+            sorted.forEach(box => {
+                let line = lines.find(l => Math.abs(l.baseline - box.baseline) <= LINE_TOLERANCE_PX);
+                if (!line) {
+                    line = { baseline: box.baseline, items: [] };
+                    lines.push(line);
+                }
+                line.items.push(box);
+            });
+
+            const groupedLines = lines.map(line => {
+                line.items.sort((a, b) => a.left - b.left);
+                let text = '';
+                let prevRight = null;
+                line.items.forEach(box => {
+                    if (prevRight !== null && (box.left - prevRight) > box.height * 0.3) {
+                        text += ' ';
+                    }
+                    text += box.text;
+                    prevRight = box.left + box.width;
+                });
+
+                const left = Math.min(...line.items.map(b => b.left));
+                const top = Math.min(...line.items.map(b => b.top));
+                const right = Math.max(...line.items.map(b => b.left + b.width));
+                const bottom = Math.max(...line.items.map(b => b.top + b.height));
+                const maxHeight = Math.max(...line.items.map(b => b.height));
+
+                return {
+                    text: text,
+                    left: left,
+                    top: top,
+                    width: right - left,
+                    height: bottom - top,
+                    fontSize: maxHeight
+                };
+            });
+
+            pageTextLinesCache[pageNum] = groupedLines;
+            return groupedLines;
+        }
+
+        // Cari baris teks yang mengandung titik klik (dengan sedikit padding
+        // toleransi), dan yang belum pernah dikonversi jadi kotak teks editable.
+        function findTextLineAtPoint(lines, pageNum, x, y) {
+            const PADDING = 3;
+            const converted = convertedTextLines[pageNum] || new Set();
+
+            for (let idx = 0; idx < lines.length; idx++) {
+                if (converted.has(idx)) continue;
+                const l = lines[idx];
+                if (
+                    x >= l.left - PADDING && x <= l.left + l.width + PADDING &&
+                    y >= l.top - PADDING && y <= l.top + l.height + PADDING
+                ) {
+                    return { index: idx, line: l };
+                }
+            }
+            return null;
+        }
+
+        // SET DAN HIGHLIGHT HALAMAN AKTIF
+        function setActivePage(pageNum) {
+            if (!pdfDocInstance || deletedPages.has(pageNum)) return;
+
+            currentPageNum = pageNum;
+            document.getElementById('current-page-num').innerText = currentPageNum;
+
+            // Alihkan pointer canvas utama yang sedang diedit ke halaman ini
+            fCanvas = activeFabricCanvases[pageNum];
+
+            // Beri efek border biru pada halaman aktif
+            for (let i = 1; i <= totalPages; i++) {
+                const wrapper = document.getElementById(`page-wrapper-${i}`);
+                if (wrapper) {
+                    if (i === pageNum) {
+                        wrapper.classList.add('active-page-border');
+                    } else {
+                        wrapper.classList.remove('active-page-border');
+                    }
+                }
+            }
+
+            updateSidebarHighlight();
+            updateUndoRedoButtons();
+            applyToolState();
+        }
+
+        // SCROLL SPY: MENDETEKSI HALAMAN AKTIF BERDASARKAN POSISI SCROLL VERTIKAL
+        function setupScrollSpy() {
+            if (viewMode !== 'scroll') return;
+
+            editorViewport.onscroll = () => {
+                const pageContainers = document.querySelectorAll('.pdf-page-container');
+                let activePage = currentPageNum;
+                let minDistance = Infinity;
+
+                pageContainers.forEach(container => {
+                    const rect = container.getBoundingClientRect();
+                    const viewportRect = editorViewport.getBoundingClientRect();
+                    
+                    // Hitung jarak tengah halaman ke tengah viewport area
+                    const containerCenter = rect.top + rect.height / 2;
+                    const viewportCenter = viewportRect.top + viewportRect.height / 2;
+                    const distance = Math.abs(containerCenter - viewportCenter);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        activePage = parseInt(container.dataset.pageNum);
+                    }
+                });
+
+                if (activePage !== currentPageNum) {
+                    setActivePage(activePage);
+                }
+            };
+        }
+
+        // SINKRONISASI CACHE OBJEK HALAMAN AKTIF
+        function saveCurrentPageObjects() {
+            if (!fCanvas || !pdfDocInstance) return;
+            pageObjectsCache[currentPageNum] = JSON.stringify(fCanvas.toJSON());
+        }
+
+        // FIX ZOOM: waktu di-zoom in/out, ukuran halaman PDF berubah tapi posisi
+        // objek hasil editan (teks, shape, crop, dll) sebelumnya TIDAK ikut
+        // disesuaikan -- jadi kelihatan "tertinggal"/geser dari PDF-nya. Fungsi ini
+        // menggeser & menskalakan ulang SEMUA objek di SEMUA halaman yang sedang
+        // aktif, sebanding dengan rasio perubahan zoom, tepat sebelum re-render,
+        // supaya semuanya tetap "menempel" pas di posisi PDF aslinya.
+        function rescaleAllPageObjects(ratio) {
+            if (!ratio || ratio === 1) return;
+
+            Object.keys(activeFabricCanvases).forEach(pageNumKey => {
+                const canvas = activeFabricCanvases[pageNumKey];
+                canvas.getObjects().forEach(obj => {
+                    obj.set({
+                        left: obj.left * ratio,
+                        top: obj.top * ratio,
+                        scaleX: (obj.scaleX || 1) * ratio,
+                        scaleY: (obj.scaleY || 1) * ratio
+                    });
+                    obj.setCoords();
+                });
+                canvas.renderAll();
+
+                // Simpan balik ke cache dalam koordinat yang sudah disesuaikan,
+                // supaya renderAllPages() berikutnya memuat posisi yang benar.
+                pageObjectsCache[pageNumKey] = JSON.stringify(canvas.toJSON());
+            });
+        }
+
+        // ===== Helper matriks affine 2D (dipakai untuk memetakan posisi objek
+        // antar orientasi viewport saat halaman diputar) =====
+        function invertAffineMatrix(m) {
+            const [a, b, c, d, e, f] = m;
+            const det = a * d - b * c;
+            return [
+                d / det, -b / det,
+                -c / det, a / det,
+                (c * f - d * e) / det, (b * e - a * f) / det
+            ];
+        }
+
+        function applyAffineMatrix(m, x, y) {
+            const [a, b, c, d, e, f] = m;
+            return [a * x + c * y + e, b * x + d * y + f];
+        }
+
+        // Memetakan satu titik dari ruang koordinat viewport LAMA ke viewport BARU.
+        // Caranya: titik di-"kembalikan" dulu ke ruang koordinat PDF asli (lewat
+        // invers transform viewport lama), lalu diproyeksikan ke ruang viewport
+        // baru (lewat transform viewport baru). Ini memakai matriks transform
+        // dari pdf.js sendiri, jadi dijamin konsisten dengan bagaimana PDF.js
+        // memutar & menskalakan konten aslinya.
+        function mapPointBetweenViewports(x, y, oldViewport, newViewport) {
+            const inv = invertAffineMatrix(oldViewport.transform);
+            const [pdfX, pdfY] = applyAffineMatrix(inv, x, y);
+            return applyAffineMatrix(newViewport.transform, pdfX, pdfY);
+        }
+
+        // FIX ROTASI: waktu halaman diputar, isi PDF-nya (canvas latar) otomatis
+        // berputar lewat viewport pdf.js -- tapi objek editan (teks, shape, hasil
+        // crop, dll) sebelumnya diam saja di posisi/orientasi lama. Fungsi ini
+        // memutar & memindahkan SETIAP objek pada satu halaman supaya tetap
+        // "menempel" di posisi yang sama relatif terhadap PDF-nya, walau
+        // orientasi halaman berubah.
+        function rotateAllObjectsOnPage(pageNum, oldViewport, newViewport, deltaDegrees) {
+            const canvas = activeFabricCanvases[pageNum];
+            if (!canvas || !oldViewport || !newViewport) return;
+
+            canvas.getObjects().forEach(obj => {
+                // Pakai TITIK PUSAT objek (bukan left/top) karena Fabric memutar
+                // objek di sekitar titik pusatnya, bukan sudut kiri-atas.
+                const centerOld = obj.getCenterPoint();
+                const [newCx, newCy] = mapPointBetweenViewports(centerOld.x, centerOld.y, oldViewport, newViewport);
+
+                obj.angle = ((obj.angle || 0) + deltaDegrees + 360) % 360;
+                obj.setPositionByOrigin(new fabric.Point(newCx, newCy), 'center', 'center');
+                obj.setCoords();
+            });
+
+            canvas.renderAll();
+            pageObjectsCache[pageNum] = JSON.stringify(canvas.toJSON());
+        }
+
+        // FUNGSI MANAJEMEN RIWAYAT (UNDO/REDO ACTIONS)
+        function saveStateToHistory(pageNum, canvasObj) {
+            if (isRespondingToStateChange || !canvasObj) return;
+            
+            const currentState = JSON.stringify(canvasObj.toJSON());
+            
+            if (!pageUndoStacks[pageNum]) {
+                pageUndoStacks[pageNum] = [];
+            }
+            if (!pageRedoStacks[pageNum]) {
+                pageRedoStacks[pageNum] = [];
+            }
+
+            const len = pageUndoStacks[pageNum].length;
+            if (len > 0 && pageUndoStacks[pageNum][len - 1] === currentState) {
+                return;
+            }
+
+            pageUndoStacks[pageNum].push(currentState);
+            pageRedoStacks[pageNum] = []; // Reset Redo
+            
+            updateUndoRedoButtons();
+            pageObjectsCache[pageNum] = currentState; // Sinkronkan ke cache
+        }
+
+        function triggerUndo() {
+            const page = currentPageNum;
+            const canvasObj = activeFabricCanvases[page];
+            if (!canvasObj || !pageUndoStacks[page] || pageUndoStacks[page].length <= 1) return;
+
+            const currentState = pageUndoStacks[page].pop();
+            if (!pageRedoStacks[page]) pageRedoStacks[page] = [];
+            pageRedoStacks[page].push(currentState);
+
+            const prevState = pageUndoStacks[page][pageUndoStacks[page].length - 1];
+            
+            isRespondingToStateChange = true;
+            canvasObj.loadFromJSON(prevState, () => {
+                canvasObj.renderAll();
+                isRespondingToStateChange = false;
+                updateUndoRedoButtons();
+                pageObjectsCache[page] = prevState;
+            });
+        }
+
+        function triggerRedo() {
+            const page = currentPageNum;
+            const canvasObj = activeFabricCanvases[page];
+            if (!canvasObj || !pageRedoStacks[page] || pageRedoStacks[page].length === 0) return;
+
+            const nextState = pageRedoStacks[page].pop();
+            pageUndoStacks[page].push(nextState);
+
+            isRespondingToStateChange = true;
+            canvasObj.loadFromJSON(nextState, () => {
+                canvasObj.renderAll();
+                isRespondingToStateChange = false;
+                updateUndoRedoButtons();
+                pageObjectsCache[page] = nextState;
+            });
+        }
+
+        function updateUndoRedoButtons() {
+            const page = currentPageNum;
+            const undoBtn = document.getElementById('btn-undo');
+            const redoBtn = document.getElementById('btn-redo');
+
+            if (pageUndoStacks[page] && pageUndoStacks[page].length > 1) {
+                undoBtn.removeAttribute('disabled');
+                undoBtn.classList.remove('text-slate-500', 'hover:text-slate-500');
+                undoBtn.classList.add('text-slate-200', 'hover:text-white');
+            } else {
+                undoBtn.setAttribute('disabled', 'true');
+                undoBtn.classList.remove('text-slate-200', 'hover:text-white');
+                undoBtn.classList.add('text-slate-500', 'hover:text-slate-500');
+            }
+
+            if (pageRedoStacks[page] && pageRedoStacks[page].length > 0) {
+                redoBtn.removeAttribute('disabled');
+                redoBtn.classList.remove('text-slate-500', 'hover:text-slate-500');
+                redoBtn.classList.add('text-slate-200', 'hover:text-white');
+            } else {
+                redoBtn.setAttribute('disabled', 'true');
+                redoBtn.classList.remove('text-slate-200', 'hover:text-white');
+                redoBtn.classList.add('text-slate-500', 'hover:text-slate-500');
+            }
+        }
+
+        // Buat Thumbnail Halaman pada Sidebar
+        function generateSidebarThumbnails() {
+            const container = document.getElementById('pages-container');
+            container.innerHTML = '';
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (deletedPages.has(i)) continue;
+
+                const wrapper = document.createElement('div');
+                wrapper.className = `p-2.5 bg-slate-900 hover:bg-slate-800 rounded-xl cursor-pointer border border-slate-850 flex items-center gap-3 transition ${i === currentPageNum ? 'border-blue-500 bg-slate-800' : ''}`;
+                wrapper.id = `thumb-page-${i}`;
+                wrapper.onclick = () => {
+                    saveCurrentPageObjects();
+                    currentPageNum = i;
+                    
+                    if (viewMode === 'single') {
+                        renderAllPages();
+                    } else {
+                        // Jika mode scroll, langsung gulirkan layar ke elemen target
+                        const el = document.getElementById(`page-wrapper-${i}`);
+                        scrollPageIntoView(el);
+                        setActivePage(i);
+                    }
+                };
+
+                const num = document.createElement('span');
+                num.className = 'w-6 h-6 rounded-lg bg-slate-950 text-[10px] font-bold flex items-center justify-center text-slate-400 border border-slate-800';
+                num.innerText = i;
+
+                const label = document.createElement('div');
+                label.className = 'flex-1 min-w-0';
+                label.innerHTML = `
+                    <p class="text-xs font-semibold text-slate-200">Halaman ${i}</p>
+                    <p class="text-[9px] text-slate-500">Putar: ${rotationStates[i] || 0}°</p>
+                `;
+
+                wrapper.appendChild(num);
+                wrapper.appendChild(label);
+                container.appendChild(wrapper);
+            }
+        }
+
+        function updateSidebarHighlight() {
+            for (let i = 1; i <= totalPages; i++) {
+                const el = document.getElementById(`thumb-page-${i}`);
+                if (el) {
+                    if (i === currentPageNum) {
+                        el.classList.add('border-blue-500', 'bg-slate-800');
+                    } else {
+                        el.classList.remove('border-blue-500', 'bg-slate-800');
+                    }
+                }
+            }
+        }
+
+        // TOGGLE VIEW MODE: SINGLE PAGE VS SCROLL VERTIKAL
+        const btnViewSingle = document.getElementById('btn-view-single');
+        const btnViewScroll = document.getElementById('btn-view-scroll');
+
+        btnViewSingle.addEventListener('click', () => {
+            if (viewMode === 'single') return;
+            viewMode = 'single';
+            btnViewSingle.classList.add('bg-blue-600', 'text-white', 'shadow-md');
+            btnViewSingle.classList.remove('text-slate-400');
+            btnViewScroll.classList.remove('bg-blue-600', 'text-white', 'shadow-md');
+            btnViewScroll.classList.add('text-slate-400');
+            editorViewport.onscroll = null; // Matikan scroll spy
+            renderAllPages();
+        });
+
+        btnViewScroll.addEventListener('click', () => {
+            if (viewMode === 'scroll') return;
+            viewMode = 'scroll';
+            btnViewScroll.classList.add('bg-blue-600', 'text-white', 'shadow-md');
+            btnViewScroll.classList.remove('text-slate-400');
+            btnViewSingle.classList.remove('bg-blue-600', 'text-white', 'shadow-md');
+            btnViewSingle.classList.add('text-slate-400');
+            renderAllPages();
+        });
+
+        // PENGELOLA ALAT (ACTIVE TOOL CONTROLLER)
+        const tools = {
+            'cropmove': document.getElementById('tool-cropmove'),
+            'select': document.getElementById('tool-select'),
+            'pen': document.getElementById('tool-pen'),
+            'highlighter': document.getElementById('tool-highlighter'),
+            'text': document.getElementById('tool-text'),
+            'edit-text': document.getElementById('tool-edit-text'),
+            'shapes': document.getElementById('tool-shapes'),
+            'whiteout': document.getElementById('tool-whiteout'),
+            'signature': document.getElementById('tool-signature')
+        };
+
+        // Nama tool bentuk yang harus menyalakan highlight tombol dropdown "shapes"
+        const SHAPE_TOOL_NAMES = ['rect', 'oval', 'circle', 'line'];
+
+        Object.keys(tools).forEach(toolName => {
+            if (toolName === 'shapes') return; // Tombol ini cuma pemicu hover-dropdown, bukan tool langsung
+            tools[toolName].addEventListener('click', () => {
+                setActiveTool(toolName);
+            });
+        });
+
+        function setActiveTool(toolName) {
+            activeTool = toolName;
+
+            // Kelompokkan rect/oval/circle/line agar menyalakan highlight tombol dropdown "shapes"
+            const displayGroup = SHAPE_TOOL_NAMES.includes(toolName) ? 'shapes' : toolName;
+
+            Object.keys(tools).forEach(name => {
+                if (name === displayGroup) {
+                    tools[name].classList.add('active');
+                } else {
+                    tools[name].classList.remove('active');
+                }
+            });
+
+            // Terapkan ke semua canvas halaman agar responsif saat di-scroll
+            Object.values(activeFabricCanvases).forEach(c => applyToolStateToCanvas(c));
+        }
+
+        function applyToolState() {
+            if (fCanvas) {
+                applyToolStateToCanvas(fCanvas);
+            }
+        }
+
+        function applyToolStateToCanvas(canvasObj) {
+            if (!canvasObj) return;
+
+            // Reset Default State
+            canvasObj.isDrawingMode = false;
+            canvasObj.selection = false;
+            canvasObj.off('mouse:down');
+            canvasObj.off('mouse:move');
+            canvasObj.off('mouse:up');
+            
+            canvasObj.forEachObject(obj => {
+                obj.selectable = false;
+                obj.hoverCursor = 'default';
+            });
+
+            if (activeTool === 'select') {
+                canvasObj.selection = true;
+                canvasObj.forEachObject(obj => {
+                    obj.selectable = true;
+                    obj.hoverCursor = 'move';
+                });
+            } else if (activeTool === 'pen' || activeTool === 'highlighter') {
+                canvasObj.isDrawingMode = true;
+                const brush = canvasObj.freeDrawingBrush;
+
+                if (activeTool === 'highlighter') {
+                    // Stabilo: lebih lebar dari pen (3x), warna transparan, ujung
+                    // goresan rata (square) supaya terasa seperti marker, bukan pena.
+                    brush.color = hexToRgbA(globalColor, 0.4);
+                    brush.width = parseInt(strokeWidth) * 3;
+                    brush.strokeLineCap = 'square';
+                    brush.strokeLineJoin = 'round';
+                } else {
+                    // Pen: warna solid, ketebalan sesuai pilihan, ujung bulat normal.
+                    brush.color = globalColor;
+                    brush.width = parseInt(strokeWidth);
+                    brush.strokeLineCap = 'round';
+                    brush.strokeLineJoin = 'round';
+                }
+            } else if (activeTool === 'text') {
+                canvasObj.on('mouse:down', function(opt) {
+                    if (activeTool !== 'text') return;
+                    const pointer = canvasObj.getPointer(opt.e);
+
+                    const textObj = new fabric.IText('Ketik Teks Baru', {
+                        left: pointer.x,
+                        top: pointer.y,
+                        fontFamily: selectedFontFamily,
+                        fill: globalColor,
+                        fontSize: parseInt(fontSize),
+                        fontWeight: 'bold'
+                    });
+                    
+                    canvasObj.add(textObj);
+                    canvasObj.setActiveObject(textObj);
+                    setActiveTool('select');
+                });
+            } else if (activeTool === 'edit-text') {
+                canvasObj.on('mouse:down', async function(opt) {
+                    if (activeTool !== 'edit-text') return;
+
+                    const wrapper = canvasObj.getElement().closest('.pdf-page-container');
+                    const pageNum = parseInt(wrapper.dataset.pageNum);
+                    const pointer = canvasObj.getPointer(opt.e);
+
+                    const lines = await getPageTextLines(pageNum);
+                    if (lines.length === 0) {
+                        showToast("Tidak ada teks yang terdeteksi di halaman ini (mungkin hasil scan/gambar).", "error");
+                        return;
+                    }
+
+                    const found = findTextLineAtPoint(lines, pageNum, pointer.x, pointer.y);
+                    if (!found) return; // Klik di area kosong, tidak ada baris teks di situ
+
+                    // Kalau tool sudah berpindah selagi menunggu getPageTextLines (async),
+                    // batalkan supaya tidak salah menempatkan kotak teks.
+                    if (activeTool !== 'edit-text') return;
+
+                    const { index, line } = found;
+
+                    // Tandai baris ini sudah dikonversi supaya tidak dobel kalau diklik lagi
+                    if (!convertedTextLines[pageNum]) convertedTextLines[pageNum] = new Set();
+                    convertedTextLines[pageNum].add(index);
+
+                    // Tutup teks asli dengan kotak putih (sedikit padding biar rapi menutupi)
+                    const PAD = 1.5;
+                    const coverRect = new fabric.Rect({
+                        left: line.left - PAD,
+                        top: line.top - PAD,
+                        width: line.width + PAD * 2,
+                        height: line.height + PAD * 2,
+                        fill: '#ffffff',
+                        selectable: false
+                    });
+                    canvasObj.add(coverRect);
+
+                    // Ganti dengan kotak teks yang bisa diedit, terisi teks aslinya
+                    const textObj = new fabric.IText(line.text, {
+                        left: line.left,
+                        top: line.top,
+                        fontFamily: selectedFontFamily,
+                        fill: '#000000',
+                        fontSize: Math.max(8, Math.round(line.height))
+                    });
+
+                    canvasObj.add(textObj);
+                    canvasObj.setActiveObject(textObj);
+                    // Langsung masuk mode edit dengan semua teks terpilih, supaya
+                    // user bisa langsung ketik untuk mengganti isinya.
+                    textObj.enterEditing();
+                    textObj.selectAll();
+                    canvasObj.renderAll();
+
+                    saveStateToHistory(pageNum, canvasObj);
+                    showToast("Baris teks siap diedit. Klik baris lain untuk edit berikutnya.", "success");
+                    // Sengaja TIDAK auto-pindah ke tool 'select', supaya user bisa
+                    // langsung klik baris teks lain berikutnya di halaman yang sama.
+                });
+            } else if (SHAPE_TOOL_NAMES.includes(activeTool)) {
+                let shape, isDown, origX, origY, shapeType;
+
+                canvasObj.on('mouse:down', function(opt) {
+                    if (!SHAPE_TOOL_NAMES.includes(activeTool)) return;
+                    isDown = true;
+                    shapeType = activeTool;
+                    const pointer = canvasObj.getPointer(opt.e);
+                    origX = pointer.x;
+                    origY = pointer.y;
+                    const strokeW = parseInt(strokeWidth) || 4;
+                    const commonProps = {
+                        stroke: globalColor,
+                        strokeWidth: strokeW,
+                        fill: 'transparent',
+                        selectable: false,
+                        originX: 'left',
+                        originY: 'top'
+                    };
+
+                    if (shapeType === 'rect') {
+                        shape = new fabric.Rect({ ...commonProps, left: origX, top: origY, width: 0, height: 0 });
+                    } else if (shapeType === 'oval') {
+                        shape = new fabric.Ellipse({ ...commonProps, left: origX, top: origY, rx: 0, ry: 0 });
+                    } else if (shapeType === 'circle') {
+                        shape = new fabric.Circle({ ...commonProps, left: origX, top: origY, radius: 0 });
+                    } else if (shapeType === 'line') {
+                        shape = new fabric.Line([origX, origY, origX, origY], {
+                            stroke: globalColor,
+                            strokeWidth: strokeW,
+                            selectable: false
+                        });
+                    }
+                    canvasObj.add(shape);
+                });
+
+                canvasObj.on('mouse:move', function(opt) {
+                    if (!isDown || !shape) return;
+                    const pointer = canvasObj.getPointer(opt.e);
+                    const w = pointer.x - origX;
+                    const h = pointer.y - origY;
+
+                    if (shapeType === 'rect') {
+                        shape.set({
+                            left: Math.min(origX, pointer.x),
+                            top: Math.min(origY, pointer.y),
+                            width: Math.abs(w),
+                            height: Math.abs(h)
+                        });
+                    } else if (shapeType === 'oval') {
+                        shape.set({
+                            left: Math.min(origX, pointer.x),
+                            top: Math.min(origY, pointer.y),
+                            rx: Math.abs(w) / 2,
+                            ry: Math.abs(h) / 2
+                        });
+                    } else if (shapeType === 'circle') {
+                        const r = Math.max(Math.abs(w), Math.abs(h)) / 2;
+                        shape.set({
+                            left: Math.min(origX, pointer.x),
+                            top: Math.min(origY, pointer.y),
+                            radius: r
+                        });
+                    } else if (shapeType === 'line') {
+                        shape.set({ x2: pointer.x, y2: pointer.y });
+                    }
+                    canvasObj.renderAll();
+                });
+
+                canvasObj.on('mouse:up', function() {
+                    if (!isDown) return;
+                    isDown = false;
+
+                    if (shape) {
+                        const tooSmall = shapeType === 'line'
+                            ? (Math.abs(shape.x2 - shape.x1) < 5 && Math.abs(shape.y2 - shape.y1) < 5)
+                            : (shape.width < 5 && shape.height < 5 && (shape.radius || 0) < 5 && (shape.rx || 0) < 5);
+
+                        if (tooSmall) {
+                            canvasObj.remove(shape);
+                        } else {
+                            shape.set({ selectable: true, hoverCursor: 'move' });
+                            shape.setCoords();
+                            canvasObj.setActiveObject(shape);
+                            saveStateToHistory(currentPageNum, canvasObj);
+                        }
+                    }
+                    setActiveTool('select');
+                });
+            } else if (activeTool === 'whiteout') {
+                canvasObj.on('mouse:down', function(opt) {
+                    if (activeTool !== 'whiteout') return;
+                    const pointer = canvasObj.getPointer(opt.e);
+                    const whiteBlock = new fabric.Rect({
+                        left: pointer.x,
+                        top: pointer.y,
+                        width: 120,
+                        height: 40,
+                        fill: '#ffffff',
+                        stroke: '#e2e8f0',
+                        strokeWidth: 1,
+                        strokeDashArray: [4, 4]
+                    });
+                    canvasObj.add(whiteBlock);
+                    canvasObj.setActiveObject(whiteBlock);
+                    setActiveTool('select');
+                    showToast("Bidang penghapus putih dibuat! Geser di atas teks asli untuk menghapusnya.", "info");
+                });
+            } else if (activeTool === 'cropmove') {
+                let rect, isDown, origX, origY;
+                
+                canvasObj.on('mouse:down', function(o) {
+                    if (activeTool !== 'cropmove') return;
+                    isDown = true;
+                    const pointer = canvasObj.getPointer(o.e);
+                    origX = pointer.x;
+                    origY = pointer.y;
+                    
+                    rect = new fabric.Rect({
+                        left: origX,
+                        top: origY,
+                        width: 0,
+                        height: 0,
+                        fill: 'rgba(59, 130, 246, 0.2)',
+                        stroke: '#3b82f6',
+                        strokeWidth: 2,
+                        strokeDashArray: [5, 5],
+                        selectable: false
+                    });
+                    canvasObj.add(rect);
+                });
+
+                canvasObj.on('mouse:move', function(o) {
+                    if (!isDown || activeTool !== 'cropmove') return;
+                    const pointer = canvasObj.getPointer(o.e);
+                    
+                    if (origX > pointer.x) {
+                        rect.set({ left: Math.abs(pointer.x) });
+                    }
+                    if (origY > pointer.y) {
+                        rect.set({ top: Math.abs(pointer.y) });
+                    }
+                    
+                    rect.set({ width: Math.abs(origX - pointer.x) });
+                    rect.set({ height: Math.abs(origY - pointer.y) });
+                    canvasObj.renderAll();
+                });
+
+                canvasObj.on('mouse:up', async function() {
+                    if (!isDown || activeTool !== 'cropmove') return;
+                    isDown = false;
+                    
+                    const width = rect.width;
+                    const height = rect.height;
+                    const left = rect.left;
+                    const top = rect.top;
+                    
+                    canvasObj.remove(rect);
+
+                    if (width < 10 || height < 10) {
+                        showToast("Area seleksi terlalu kecil.", "error");
+                        setActiveTool('select');
+                        return;
+                    }
+
+                    // Ambil nomor halaman & referensi pdf.js asli untuk render ulang
+                    const wrapper = canvasObj.getElement().closest('.pdf-page-container');
+                    const pageNum = parseInt(wrapper.dataset.pageNum);
+                    const page = pdfPageProxies[pageNum];
+
+                    if (!page) {
+                        showToast("Gagal memproses crop: halaman tidak ditemukan.", "error");
+                        setActiveTool('select');
+                        return;
+                    }
+
+                    showToast("Memproses potongan gambar...", "info");
+
+                    // FIX BURAM (cara yang lebih tepat): daripada mengambil sampel dari
+                    // canvas layar yang resolusinya dibatasi (RENDER_DPR, demi performa
+                    // & ukuran file saat export), kita render ULANG langsung dari data
+                    // PDF asli KHUSUS untuk area yang di-crop saja, pada resolusi jauh
+                    // lebih tinggi. Karena cuma area kecil yang dirender ulang (bukan
+                    // seluruh halaman), ini tetap aman untuk memori & hasilnya jauh
+                    // lebih tajam karena diambil langsung dari data vektor PDF asli,
+                    // bukan upscale dari bitmap yang resolusinya sudah terbatas.
+                    const DESIRED_SAMPLE = 4;
+                    const MAX_CROP_MEGAPIXELS = 16_000_000; // batas aman memori
+                    const rawPixels = width * height * DESIRED_SAMPLE * DESIRED_SAMPLE;
+                    const cropSample = rawPixels > MAX_CROP_MEGAPIXELS
+                        ? Math.max(1, Math.floor(Math.sqrt(MAX_CROP_MEGAPIXELS / (width * height))))
+                        : DESIRED_SAMPLE;
+
+                    const rot = rotationStates[pageNum] || 0;
+                    const highViewport = page.getViewport({ scale: currentZoom * cropSample, rotation: rot });
+
+                    // Posisi & ukuran area crop dalam ruang resolusi tinggi tsb
+                    const sx = Math.round(left * cropSample);
+                    const sy = Math.round(top * cropSample);
+                    const sw = Math.round(width * cropSample);
+                    const sh = Math.round(height * cropSample);
+
+                    // Canvas sementara HANYA seukuran area crop (bukan seluruh
+                    // halaman!), digeser lewat parameter `transform` supaya bagian
+                    // yang diinginkan jatuh tepat di titik (0,0).
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = sw;
+                    tempCanvas.height = sh;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.imageSmoothingEnabled = false;
+
+                    try {
+                        await page.render({
+                            canvasContext: tempCtx,
+                            viewport: highViewport,
+                            transform: [1, 0, 0, 1, -sx, -sy]
+                        }).promise;
+                    } catch (err) {
+                        console.error(err);
+                        showToast("Gagal merender area crop.", "error");
+                        setActiveTool('select');
+                        return;
+                    }
+
+                    const croppedDataUrl = tempCanvas.toDataURL();
+
+                    const coverRect = new fabric.Rect({
+                        left: left,
+                        top: top,
+                        width: width,
+                        height: height,
+                        fill: '#ffffff',
+                        selectable: false
+                    });
+                    canvasObj.add(coverRect);
+
+                    fabric.Image.fromURL(croppedDataUrl, function(imgObj) {
+                        imgObj.set({
+                            left: left,
+                            top: top,
+                            // Gambar disimpan pada resolusi tinggi (sw x sh piksel),
+                            // di-scale turun ke ukuran tampilan CSS aslinya (width x
+                            // height) berdasarkan dimensi HASIL PEMBULATAN, supaya
+                            // ukurannya presisi walau ada pembulatan sebelumnya.
+                            scaleX: width / sw,
+                            scaleY: height / sh,
+                            selectable: true,
+                            hoverCursor: 'move',
+                            borderDashArray: [3, 3],
+                            borderColor: '#eab308'
+                        });
+                        canvasObj.add(imgObj);
+                        canvasObj.setActiveObject(imgObj);
+                        
+                        saveStateToHistory(pageNum, canvasObj);
+                        setActiveTool('select');
+                        showToast("Elemen asli berhasil dipotong dan bisa digeser!", "success");
+                    });
+                });
+            }
+        }
+
+        // SISIPKAN SIMBOL KUSTOM
+        function insertSymbol(symbol, defaultColor) {
+            if (!fCanvas) {
+                showToast("Buka atau pilih halaman PDF terlebih dahulu.", "error");
+                return;
+            }
+
+            const size = parseInt(fontSize) * 1.5;
+            const symObj = new fabric.Text(symbol, {
+                left: 100,
+                top: 100,
+                fontSize: size,
+                fill: defaultColor,
+                fontWeight: 'bold',
+                fontFamily: 'sans-serif'
+            });
+
+            fCanvas.add(symObj);
+            fCanvas.setActiveObject(symObj);
+            saveStateToHistory(currentPageNum, fCanvas);
+            setActiveTool('select');
+            showToast("Simbol berhasil ditempel! Anda bebas menggesernya.", "success");
+        }
+
+        // Pengatur Warna Global & Ukuran Line
+        function setGlobalColor(color) {
+            globalColor = color;
+            document.getElementById('color-indicator').style.backgroundColor = color;
+            
+            if (fCanvas && fCanvas.getActiveObject()) {
+                const activeObj = fCanvas.getActiveObject();
+                if (activeObj.type === 'i-text' || activeObj.type === 'text') {
+                    activeObj.set({ fill: color });
+                } else {
+                    activeObj.set({ stroke: color });
+                }
+                fCanvas.renderAll();
+                saveStateToHistory(currentPageNum, fCanvas);
+            }
+
+            // FIX: kalau tool gambar (pen/highlighter) sedang aktif, warna kuas
+            // harus langsung ikut berubah di SEMUA canvas halaman, bukan cuma
+            // menunggu ada objek yang dipilih (karena saat menggambar tidak ada
+            // objek yang "selected").
+            if (activeTool === 'pen' || activeTool === 'highlighter') {
+                const brushColor = activeTool === 'highlighter' ? hexToRgbA(color, 0.4) : color;
+                Object.values(activeFabricCanvases).forEach(c => {
+                    if (c.freeDrawingBrush) {
+                        c.freeDrawingBrush.color = brushColor;
+                    }
+                });
+            }
+        }
+
+        document.getElementById('font-family-selector').addEventListener('change', (e) => {
+            selectedFontFamily = e.target.value;
+            if (fCanvas && fCanvas.getActiveObject()) {
+                const activeObj = fCanvas.getActiveObject();
+                if (activeObj.type === 'i-text' || activeObj.type === 'text') {
+                    activeObj.set({ fontFamily: selectedFontFamily });
+                    fCanvas.renderAll();
+                    saveStateToHistory(currentPageNum, fCanvas);
+                }
+            }
+        });
+
+        document.getElementById('stroke-width').addEventListener('change', (e) => {
+            strokeWidth = e.target.value;
+
+            // Update kuas pen/highlighter yang sedang aktif di semua canvas
+            Object.values(activeFabricCanvases).forEach(c => {
+                if (c.freeDrawingBrush) {
+                    c.freeDrawingBrush.width = activeTool === 'highlighter'
+                        ? parseInt(strokeWidth) * 3
+                        : parseInt(strokeWidth);
+                }
+            });
+
+            // Kalau ada objek bentuk/garis yang sedang dipilih, update ketebalannya juga
+            if (fCanvas && fCanvas.getActiveObject()) {
+                const activeObj = fCanvas.getActiveObject();
+                if (activeObj.type !== 'i-text' && activeObj.type !== 'text') {
+                    activeObj.set({ strokeWidth: parseInt(strokeWidth) });
+                    fCanvas.renderAll();
+                    saveStateToHistory(currentPageNum, fCanvas);
+                }
+            }
+        });
+
+        document.getElementById('font-size').addEventListener('change', (e) => {
+            fontSize = e.target.value;
+
+            // Kalau ada teks yang sedang dipilih, update ukurannya langsung
+            if (fCanvas && fCanvas.getActiveObject()) {
+                const activeObj = fCanvas.getActiveObject();
+                if (activeObj.type === 'i-text' || activeObj.type === 'text') {
+                    activeObj.set({ fontSize: parseInt(fontSize) });
+                    fCanvas.renderAll();
+                    saveStateToHistory(currentPageNum, fCanvas);
+                }
+            }
+        });
+
+        // Hapus Objek Terpilih
+        document.getElementById('btn-delete-selected').addEventListener('click', () => {
+            if (!fCanvas) return;
+            const activeObj = fCanvas.getActiveObject();
+            if (activeObj) {
+                fCanvas.remove(activeObj);
+                showToast("Objek terhapus!", "info");
+            } else {
+                showToast("Pilih objek terlebih dahulu untuk dihapus.", "error");
+            }
+        });
+
+        // Hubungkan Tombol Undo dan Redo UI
+        document.getElementById('btn-undo').addEventListener('click', triggerUndo);
+        document.getElementById('btn-redo').addEventListener('click', triggerRedo);
+
+        // SHORTCUTS KEYBOARD: UNDO, REDO & ARROW KEYS NUDGE
+        window.addEventListener('keydown', (e) => {
+            if (!fCanvas) return;
+            const activeObj = fCanvas.getActiveObject();
+            
+            const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+            
+            if (isCtrlOrCmd) {
+                if (e.key.toLowerCase() === 'z') {
+                    e.preventDefault();
+                    triggerUndo();
+                    return;
+                } else if (e.key.toLowerCase() === 'y') {
+                    e.preventDefault();
+                    triggerRedo();
+                    return;
+                }
+            }
+            
+            if (activeObj && !activeObj.isEditing) {
+                const moveAmount = e.shiftKey ? 10 : 1;
+                
+                if (e.key === 'ArrowUp') {
+                    activeObj.set('top', activeObj.top - moveAmount);
+                    e.preventDefault();
+                } else if (e.key === 'ArrowDown') {
+                    activeObj.set('top', activeObj.top + moveAmount);
+                    e.preventDefault();
+                } else if (e.key === 'ArrowLeft') {
+                    activeObj.set('left', activeObj.left - moveAmount);
+                    e.preventDefault();
+                } else if (e.key === 'ArrowRight') {
+                    activeObj.set('left', activeObj.left + moveAmount);
+                    e.preventDefault();
+                } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                    fCanvas.remove(activeObj);
+                    showToast("Objek terhapus!", "info");
+                }
+                
+                fCanvas.renderAll();
+                saveCurrentPageObjects();
+                saveStateToHistory(currentPageNum, fCanvas);
+            }
+        });
+
+        // NAVIGASI ZOOM & HALAMAN
+        document.getElementById('btn-zoom-in').addEventListener('click', () => {
+            if (currentZoom < 3.0) {
+                const oldZoom = currentZoom;
+                saveCurrentPageObjects();
+                currentZoom += 0.2;
+                // FIX: sesuaikan posisi & ukuran semua objek editan sebanding
+                // dengan rasio zoom baru, supaya tetap menempel di PDF-nya.
+                rescaleAllPageObjects(currentZoom / oldZoom);
+                document.getElementById('zoom-percent').innerText = `${Math.round(currentZoom * 100)}%`;
+                renderAllPages();
+            }
+        });
+
+        document.getElementById('btn-zoom-out').addEventListener('click', () => {
+            if (currentZoom > 0.5) {
+                const oldZoom = currentZoom;
+                saveCurrentPageObjects();
+                currentZoom -= 0.2;
+                // FIX: sesuaikan posisi & ukuran semua objek editan sebanding
+                // dengan rasio zoom baru, supaya tetap menempel di PDF-nya.
+                rescaleAllPageObjects(currentZoom / oldZoom);
+                document.getElementById('zoom-percent').innerText = `${Math.round(currentZoom * 100)}%`;
+                renderAllPages();
+            }
+        });
+
+        document.getElementById('btn-prev-page').addEventListener('click', () => {
+            if (currentPageNum > 1) {
+                saveCurrentPageObjects();
+                let prev = currentPageNum - 1;
+                while (prev > 1 && deletedPages.has(prev)) {
+                    prev--;
+                }
+                if (viewMode === 'single') {
+                    currentPageNum = prev;
+                    renderAllPages();
+                } else {
+                    const el = document.getElementById('page-wrapper-' + prev);
+                    scrollPageIntoView(el);
+                    setActivePage(prev);
+                }
+            }
+        });
+
+        document.getElementById('btn-next-page').addEventListener('click', () => {
+            if (currentPageNum < totalPages) {
+                saveCurrentPageObjects();
+                let next = currentPageNum + 1;
+                while (next < totalPages && deletedPages.has(next)) {
+                    next++;
+                }
+                if (viewMode === 'single') {
+                    currentPageNum = next;
+                    renderAllPages();
+                } else {
+                    const el = document.getElementById('page-wrapper-' + next);
+                    scrollPageIntoView(el);
+                    setActivePage(next);
+                }
+            }
+        });
+
+        // AKSI PUTAR DAN HAPUS HALAMAN
+        document.getElementById('btn-rotate-page').addEventListener('click', () => {
+            if (!pdfDocInstance) return;
+
+            saveCurrentPageObjects(); // Pastikan editan terbaru tersimpan dulu
+
+            const pageNum = currentPageNum;
+            const oldRot = rotationStates[pageNum] || 0;
+            const newRot = (oldRot + 90) % 360;
+
+            // FIX: putar & pindahkan posisi semua objek editan di halaman ini
+            // supaya tetap menempel pas, sebelum halaman di-render ulang di
+            // orientasi barunya.
+            const page = pdfPageProxies[pageNum];
+            const oldViewport = pdfPageViewports[pageNum];
+            if (page && oldViewport) {
+                const newViewport = page.getViewport({ scale: currentZoom, rotation: newRot });
+                rotateAllObjectsOnPage(pageNum, oldViewport, newViewport, 90);
+            }
+
+            rotationStates[pageNum] = newRot;
+            
+            generateSidebarThumbnails();
+            renderAllPages();
+            showToast("Halaman diputar 90°", "success");
+        });
+
+        document.getElementById('btn-delete-page').addEventListener('click', () => {
+            if (!pdfDocInstance) return;
+            if (confirm(`Apakah Anda yakin ingin menghapus Halaman ${currentPageNum}?`)) {
+                deletedPages.add(currentPageNum);
+                generateSidebarThumbnails();
+                renderAllPages();
+                showToast("Halaman berhasil dibuang dari draft", "info");
+            }
+        });
+
+        // LUKIS TANDA TANGAN (SIGNATURE MODAL EVENTS)
+        function openSignatureModal() {
+            document.getElementById('signature-modal').classList.remove('hidden');
+            sigPad.width = sigPad.offsetWidth;
+            sigPad.height = sigPad.offsetHeight;
+            ctxSig.strokeStyle = '#000000';
+            ctxSig.lineWidth = 3;
+            ctxSig.lineCap = 'round';
+            ctxSig.lineJoin = 'round';
+            clearSignaturePad();
+        }
+
+        function closeSignatureModal() {
+            document.getElementById('signature-modal').classList.add('hidden');
+            setActiveTool('select');
+        }
+
+        function clearSignaturePad() {
+            ctxSig.fillStyle = '#ffffff';
+            ctxSig.fillRect(0, 0, sigPad.width, sigPad.height);
+        }
+
+        sigPad.addEventListener('mousedown', (e) => {
+            drawingSig = true;
+            const rect = sigPad.getBoundingClientRect();
+            ctxSig.beginPath();
+            ctxSig.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+        });
+
+        sigPad.addEventListener('mousemove', (e) => {
+            if (!drawingSig) return;
+            const rect = sigPad.getBoundingClientRect();
+            ctxSig.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            ctxSig.stroke();
+        });
+
+        sigPad.addEventListener('mouseup', () => drawingSig = false);
+        sigPad.addEventListener('mouseout', () => drawingSig = false);
+
+        // Touch support tanda tangan
+        sigPad.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            const rect = sigPad.getBoundingClientRect();
+            drawingSig = true;
+            ctxSig.beginPath();
+            ctxSig.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+            e.preventDefault();
+        });
+        sigPad.addEventListener('touchmove', (e) => {
+            if (!drawingSig) return;
+            const touch = e.touches[0];
+            const rect = sigPad.getBoundingClientRect();
+            ctxSig.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+            ctxSig.stroke();
+            e.preventDefault();
+        });
+
+        function saveSignature() {
+            const dataUrl = sigPad.toDataURL('image/png');
+            
+            fabric.Image.fromURL(dataUrl, (img) => {
+                img.set({
+                    left: 50,
+                    top: 50,
+                    scaleX: 0.6,
+                    scaleY: 0.6
+                });
+                fCanvas.add(img);
+                fCanvas.setActiveObject(img);
+                saveCurrentPageObjects();
+                saveStateToHistory(currentPageNum, fCanvas);
+                setActiveTool('select');
+                showToast("Tanda tangan ditambahkan! Silakan geser atau atur ukurannya.", "success");
+            });
+
+            closeSignatureModal();
+        }
+
+        // FITUR SISIPKAN HALAMAN KOSONG (INSERT BLANK PAGE)
+        document.getElementById('btn-add-blank').addEventListener('click', async () => {
+            if (!pdfDataBytes) {
+                const newDoc = await PDFLib.PDFDocument.create();
+                newDoc.addPage([595, 842]);
+                pdfDataBytes = await newDoc.save();
+                await loadPdfDocument();
+                return;
+            }
+
+            saveCurrentPageObjects();
+            showToast("Menyisipkan halaman kosong setelah halaman ini...", "info");
+
+            try {
+                const libDoc = await PDFLib.PDFDocument.load(pdfDataBytes);
+                libDoc.insertPage(currentPageNum, [595, 842]); 
+                
+                pdfDataBytes = await libDoc.save();
+                
+                const loadingTask = pdfjsLib.getDocument({ data: pdfDataBytes.slice() });
+                pdfDocInstance = await loadingTask.promise;
+                totalPages = pdfDocInstance.numPages;
+                
+                currentPageNum++;
+                generateSidebarThumbnails();
+                await renderAllPages();
+                showToast("Halaman kosong berhasil disisipkan!", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Gagal menyisipkan halaman kosong.", "error");
+            }
+        });
+
+        // FITUR PISAHKAN PDF (SPLIT PDF SYSTEM)
+        document.getElementById('btn-split').addEventListener('click', async () => {
+            if (!pdfDataBytes) return;
+            const input = prompt(`Masukkan rentang halaman yang ingin dipisah (Contoh: "1-2" atau "3-5" atau "2"):`, `${currentPageNum}`);
+            if (!input) return;
+
+            showToast("Memproses pemisahan berkas PDF...", "info");
+            try {
+                const parts = input.split('-');
+                let start = parseInt(parts[0]);
+                let end = parts[1] ? parseInt(parts[1]) : start;
+
+                if (isNaN(start) || start < 1 || end > totalPages || start > end) {
+                    showToast("Rentang halaman tidak valid.", "error");
+                    return;
+                }
+
+                const srcDoc = await PDFLib.PDFDocument.load(pdfDataBytes);
+                const subDoc = await PDFLib.PDFDocument.create();
+
+                const pagesToCopy = [];
+                for (let i = start; i <= end; i++) {
+                    pagesToCopy.push(i - 1);
+                }
+
+                const copiedPages = await subDoc.copyPages(srcDoc, pagesToCopy);
+                copiedPages.forEach(p => subDoc.addPage(p));
+
+                const subBytes = await subDoc.save();
+                
+                triggerDownload(subBytes, `split_halaman_${start}_sampai_${end}.pdf`);
+                showToast("PDF berhasil dipisahkan dan diunduh!", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Proses pemisahan PDF gagal.", "error");
+            }
+        });
+
+
+        // LOGIKA GABUNG BEBERAPA PDF (MERGE SYSTEM)
+        let mergeFiles = [];
+
+        document.getElementById('btn-merge-modal').addEventListener('click', () => {
+            document.getElementById('merge-modal').classList.remove('hidden');
+            renderMergeList();
+        });
+
+        document.getElementById('btn-close-merge').addEventListener('click', closeMergeModal);
+        document.getElementById('btn-cancel-merge').addEventListener('click', closeMergeModal);
+
+        function closeMergeModal() {
+            document.getElementById('merge-modal').classList.add('hidden');
+        }
+
+        document.getElementById('merge-file-picker').addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (!files.length) return;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+                reader.onload = function() {
+                    mergeFiles.push({
+                        name: file.name,
+                        bytes: new Uint8Array(this.result)
+                    });
+                    renderMergeList();
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        function renderMergeList() {
+            const container = document.getElementById('merge-files-list');
+            const runBtn = document.getElementById('btn-run-merge');
+
+            if (mergeFiles.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
+                        Belum ada file tambahan. Silakan klik tombol di bawah untuk menambah file.
+                    </div>
+                `;
+                runBtn.setAttribute('disabled', 'true');
+                return;
+            }
+
+            container.innerHTML = '';
+            mergeFiles.forEach((file, index) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs';
+                row.innerHTML = `
+                    <div class="flex items-center gap-2 truncate">
+                        <span class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md font-mono">${index + 1}</span>
+                        <p class="truncate text-slate-300 font-semibold">${file.name}</p>
+                    </div>
+                    <button onclick="removeMergeFile(${index})" class="text-rose-500 hover:text-rose-400 p-1">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                container.appendChild(row);
+            });
+
+            lucide.createIcons();
+
+            if (mergeFiles.length >= 2 || (pdfDataBytes && mergeFiles.length >= 1)) {
+                runBtn.removeAttribute('disabled');
+            } else {
+                runBtn.setAttribute('disabled', 'true');
+            }
+        }
+
+        window.removeMergeFile = function(index) {
+            mergeFiles.splice(index, 1);
+            renderMergeList();
+        };
+
+        document.getElementById('btn-run-merge').addEventListener('click', async () => {
+            showToast("Menggabungkan file PDF...", "info");
+            try {
+                const mergedDoc = await PDFLib.PDFDocument.create();
+
+                if (pdfDataBytes) {
+                    const baseDoc = await PDFLib.PDFDocument.load(pdfDataBytes);
+                    const pages = await mergedDoc.copyPages(baseDoc, baseDoc.getPageIndices());
+                    pages.forEach(p => mergedDoc.addPage(p));
+                }
+
+                for (const file of mergeFiles) {
+                    const docToMerge = await PDFLib.PDFDocument.load(file.bytes);
+                    const pages = await mergedDoc.copyPages(docToMerge, docToMerge.getPageIndices());
+                    pages.forEach(p => mergedDoc.addPage(p));
+                }
+
+                pdfDataBytes = await mergedDoc.save();
+                await loadPdfDocument();
+                
+                closeMergeModal();
+                mergeFiles = [];
+                showToast("Semua berkas PDF berhasil digabungkan!", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Proses penggabungan gagal.", "error");
+            }
+        });
+
+
+        // Helper: ubah data URL (mis. "data:image/png;base64,....") jadi Uint8Array
+        // mentah. Dipakai supaya pdf-lib menerima BYTE gambar langsung, bukan
+        // string base64 yang sangat panjang -- lebih stabil untuk gambar
+        // beresolusi besar (seperti hasil Crop & Move beresolusi tinggi).
+        function dataURLToUint8Array(dataURL) {
+            const base64 = dataURL.split(',')[1];
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let idx = 0; idx < len; idx++) {
+                bytes[idx] = binaryString.charCodeAt(idx);
+            }
+            return bytes;
+        }
+
+        // PROSES EKSPOR FINAL (DENGAN TRANSPOSISI LAYER VECTOR)
+        document.getElementById('btn-export').addEventListener('click', async () => {
+            if (!pdfDataBytes) return;
+
+            saveCurrentPageObjects();
+            showToast("Mengekspor file PDF final...", "info");
+
+            try {
+                const originalPdf = await PDFLib.PDFDocument.load(pdfDataBytes);
+                const finalPdf = await PDFLib.PDFDocument.create();
+
+                for (let i = 1; i <= totalPages; i++) {
+                    if (deletedPages.has(i)) continue;
+
+                    const [copiedPage] = await finalPdf.copyPages(originalPdf, [i - 1]);
+                    const { width, height } = copiedPage.getSize();
+
+                    if (rotationStates[i] !== undefined && rotationStates[i] !== 0) {
+                        copiedPage.setRotation(PDFLib.degrees(rotationStates[i]));
+                    }
+
+                    if (pageObjectsCache[i]) {
+                        const tempCanvasEl = document.createElement('canvas');
+                        tempCanvasEl.width = width * 2;
+                        tempCanvasEl.height = height * 2;
+                        
+                        const tempFCanvas = new fabric.StaticCanvas(tempCanvasEl);
+                        
+                        await new Promise((resolve) => {
+                            tempFCanvas.loadFromJSON(pageObjectsCache[i], () => {
+                                tempFCanvas.setZoom(2.0);
+                                tempFCanvas.renderAll();
+                                resolve();
+                            });
+                        });
+
+                        const highResDataUrl = tempFCanvas.toDataURL({
+                            format: 'png',
+                            multiplier: 1.0
+                        });
+
+                        const pngBytes = dataURLToUint8Array(highResDataUrl);
+                        const pngImg = await finalPdf.embedPng(pngBytes);
+                        
+                        copiedPage.drawImage(pngImg, {
+                            x: 0,
+                            y: 0,
+                            width: width,
+                            height: height,
+                            opacity: 1.0
+                        });
+
+                        tempFCanvas.dispose();
+                    }
+
+                    finalPdf.addPage(copiedPage);
+                }
+
+                const finalBytes = await finalPdf.save();
+                triggerDownload(finalBytes, `PDF_Editor_Pro_${Date.now()}.pdf`);
+                showToast("File berhasil disimpan!", "success");
+
+            } catch (err) {
+                console.error(err);
+                // FIX: tampilkan pesan error asli (bukan cuma teks generik) supaya
+                // kalau masih gagal, penyebabnya langsung kelihatan tanpa harus
+                // buka console developer.
+                const detail = err && err.message ? err.message : String(err);
+                showToast(`Gagal menyimpan PDF: ${detail}`, "error");
+            }
+        });
+
+        // Helper Download Berkas
+        function triggerDownload(bytes, filename) {
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Helper konversi warna HEX ke RGBA
+        function hexToRgbA(hex, alpha) {
+            let c;
+            if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+                c = hex.substring(1).split('');
+                if (c.length == 3) {
+                    c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+                }
+                c = '0x' + c.join('');
+                return 'rgba(' + [(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',') + ',' + alpha + ')';
+            }
+            return hex;
+        }
+    </script>
+</body>
+</html>
