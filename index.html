@@ -2179,8 +2179,8 @@
 
                 const subBytes = await subDoc.save();
                 
-                triggerDownload(subBytes, `split_halaman_${start}_sampai_${end}.pdf`);
-                showToast("PDF berhasil dipisahkan dan diunduh!", "success");
+                const saved = await saveOrDownloadFile(subBytes, `split_halaman_${start}_sampai_${end}.pdf`);
+                if (saved) showToast("PDF berhasil dipisahkan dan diunduh!", "success");
             } catch (err) {
                 console.error(err);
                 showToast("Proses pemisahan PDF gagal.", "error");
@@ -2415,8 +2415,8 @@
 
             try {
                 const finalBytes = await buildFinalPdfBytes();
-                triggerDownload(finalBytes, `PDF_Editor_Pro_${Date.now()}.pdf`);
-                showToast("File berhasil disimpan!", "success");
+                const saved = await saveOrDownloadFile(finalBytes, `PDF_Editor_Pro_${Date.now()}.pdf`);
+                if (saved) showToast("File berhasil disimpan!", "success");
 
             } catch (err) {
                 console.error(err);
@@ -2513,8 +2513,8 @@
                 // tidak perlu dikompres sama sekali -- langsung pakai versi ini
                 // supaya kualitasnya tetap maksimal (utuh, bukan gambar).
                 if (baseBytes.byteLength <= targetBytes) {
-                    triggerDownload(baseBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
-                    showToast(`Ukuran dokumen sudah di bawah ${targetLabel}, tidak perlu dikompres!`, "success");
+                    const saved = await saveOrDownloadFile(baseBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
+                    if (saved) showToast(`Ukuran dokumen sudah di bawah ${targetLabel}, tidak perlu dikompres!`, "success");
                     return;
                 }
 
@@ -2527,8 +2527,8 @@
                     bestResult = compressedBytes;
 
                     if (compressedBytes.byteLength <= targetBytes) {
-                        triggerDownload(compressedBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
-                        showToast(`Berhasil dikompres jadi ${formatBytes(compressedBytes.byteLength)} (target ${targetLabel})!`, "success");
+                        const saved = await saveOrDownloadFile(compressedBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
+                        if (saved) showToast(`Berhasil dikompres jadi ${formatBytes(compressedBytes.byteLength)} (target ${targetLabel})!`, "success");
                         return;
                     }
                 }
@@ -2536,8 +2536,8 @@
                 // Tidak ada preset yang berhasil mencapai target walau sudah
                 // paling agresif -- tetap unduhkan hasil terkecil yang berhasil
                 // dibuat sebagai upaya terbaik, dan beri tahu user secara jujur.
-                triggerDownload(bestResult, `PDF_Compressed_Terbaik_${Date.now()}.pdf`);
-                showToast(`Tidak berhasil mencapai ${targetLabel} tanpa kualitas terlalu rusak. File terkecil yang berhasil dibuat: ${formatBytes(bestResult.byteLength)}`, "error");
+                const saved = await saveOrDownloadFile(bestResult, `PDF_Compressed_Terbaik_${Date.now()}.pdf`);
+                if (saved) showToast(`Tidak berhasil mencapai ${targetLabel} tanpa kualitas terlalu rusak. File terkecil yang berhasil dibuat: ${formatBytes(bestResult.byteLength)}`, "error");
             } catch (err) {
                 console.error(err);
                 const detail = err && err.message ? err.message : String(err);
@@ -2567,7 +2567,8 @@
             });
         });
 
-        // Helper Download Berkas
+        // Helper Download Berkas (fallback lama: langsung ke folder Downloads,
+        // nama file otomatis)
         function triggerDownload(bytes, filename) {
             const blob = new Blob([bytes], { type: 'application/pdf' });
             const url = URL.createObjectURL(blob);
@@ -2578,6 +2579,43 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        // FITUR: Simpan dengan dialog "Save As" (pilih folder & nama sendiri).
+        // Memakai File System Access API bawaan browser (window.showSaveFilePicker)
+        // -- ini API NATIVE, bukan library tambahan, jadi tidak menambah beban
+        // pemrosesan apa pun ke aplikasi, hanya memunculkan dialog OS untuk
+        // memilih lokasi & nama berkas. Baru didukung browser berbasis Chromium
+        // (Chrome/Edge/Brave versi desktop) dan wajib berjalan di HTTPS/localhost.
+        // Untuk browser yang tidak mendukung (Firefox, Safari, kebanyakan
+        // browser mobile), otomatis fallback ke cara lama (auto-download).
+        async function saveOrDownloadFile(bytes, suggestedName) {
+            if (window.showSaveFilePicker) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: suggestedName,
+                        types: [{
+                            description: 'PDF Document',
+                            accept: { 'application/pdf': ['.pdf'] }
+                        }]
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(bytes);
+                    await writable.close();
+                    return true;
+                } catch (err) {
+                    // User membatalkan dialog Save As -> ini BUKAN error, jangan
+                    // ditampilkan sebagai kegagalan, cukup hentikan proses diam-diam.
+                    if (err.name === 'AbortError') return false;
+                    console.error(err);
+                    showToast("Dialog simpan gagal dibuka, mengunduh cara biasa...", "info");
+                    // lanjut ke fallback di bawah
+                }
+            }
+
+            // Fallback: browser tidak mendukung File System Access API
+            triggerDownload(bytes, suggestedName);
+            return true;
         }
 
         // Helper konversi warna HEX ke RGBA
