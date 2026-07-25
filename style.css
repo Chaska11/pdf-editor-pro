@@ -1,0 +1,57 @@
+/* FIX: Kunci viewport dokumen (html+body) agar TIDAK PERNAH ikut ter-scroll.
+           Ini penyebab utama toolbar "ikut hilang" saat pindah halaman:
+           tanpa ini, browser mencari <html> sebagai elemen scroll fallback
+           dan menggeser SELURUH halaman, bukan hanya #editor-viewport. */
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        /* Desain kustom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        
+        /* Wadah halaman PDF untuk mode Scroll */
+        .pdf-page-container {
+            position: relative;
+            background-color: #ffffff;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+            margin-bottom: 2rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .pdf-page-container.active-page-border {
+            outline: 3px solid #3b82f6;
+            box-shadow: 0 20px 25px -5px rgba(59, 130, 246, 0.3);
+        }
+        
+        .pdf-bg-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+        
+        .fabric-overlay-canvas {
+            position: relative;
+            z-index: 2;
+        }
+        
+        /* Status Tombol Aktif */
+        .tool-btn.active {
+            background-color: #2563eb;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+        }
