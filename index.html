@@ -105,11 +105,17 @@
             </label>
             
             <!-- Dropdown Manajemen Dokumen -->
-            <div class="relative group">
-                <button class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium border border-slate-700 flex items-center gap-2">
+            <!-- FIX: sebelumnya pakai group-hover:block (CSS hover) -- karena ada
+                 jarak (mt-2) antara tombol & kotak menu, kursor yang bergerak
+                 diagonal ke bawah untuk mengklik salah satu opsi sempat "keluar"
+                 dari area hover, membuat dropdown tertutup sebelum sempat diklik.
+                 Sekarang diganti jadi klik-untuk-toggle lewat JS (lihat script di
+                 bawah), lebih stabil & juga berfungsi baik di layar sentuh. -->
+            <div class="relative">
+                <button id="btn-page-tools-toggle" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium border border-slate-700 flex items-center gap-2">
                     <i data-lucide="combine" class="w-4 h-4 text-indigo-400"></i> Alat Halaman
                 </button>
-                <div class="absolute right-0 mt-2 w-48 bg-slate-900 rounded-xl border border-slate-800 shadow-2xl hidden group-hover:block z-50 py-1">
+                <div id="page-tools-dropdown" class="absolute right-0 mt-2 w-48 bg-slate-900 rounded-xl border border-slate-800 shadow-2xl hidden z-50 py-1">
                     <button id="btn-merge-modal" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
                         <i data-lucide="copy-plus" class="w-4 h-4 text-indigo-400"></i> Gabungkan PDF
                     </button>
@@ -118,6 +124,9 @@
                     </button>
                     <button id="btn-add-blank" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
                         <i data-lucide="file" class="w-4 h-4 text-emerald-400"></i> Sisipkan Halaman Kosong
+                    </button>
+                    <button id="btn-compress-modal" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
+                        <i data-lucide="file-down" class="w-4 h-4 text-amber-400"></i> Kompres PDF
                     </button>
                 </div>
             </div>
@@ -385,7 +394,17 @@
             </div>
 
             <!-- AREA VIEWPORT KANVAS RENDERING (MENDUKUNG SCROLL VERTIKAL) -->
-            <div id="editor-viewport" class="flex-1 min-h-0 overflow-auto p-12 flex flex-col items-center justify-start scroll-smooth z-10">
+            <!-- FIX PERFORMA SCROLL: sebelumnya ada class "scroll-smooth" (CSS
+                 scroll-behavior: smooth) di sini. Karena ada handler custom yang
+                 menerjemahkan tiap tick roda mouse jadi perubahan scrollTop
+                 manual (lihat 'mouse:wheel' di script), browser menganggap TIAP
+                 tick kecil itu sebagai scroll API call yang harus dianimasikan
+                 smooth -- jadi banyak animasi kecil saling tumpuk/berebut dan
+                 scroll terasa berat/lag, terutama scroll cepat atau pakai
+                 trackpad. Dihapus supaya scrollTop berubah instan (native),
+                 sementara scrollPageIntoView() tetap smooth karena dia eksplisit
+                 memanggil scrollTo({behavior:'smooth'}) lewat JS. -->
+            <div id="editor-viewport" class="flex-1 min-h-0 overflow-auto p-12 flex flex-col items-center justify-start z-10">
                 <!-- Tampilan Awal: Belum Buka Berkas -->
                 <div id="welcome-state" class="text-center max-w-lg p-8 bg-slate-900 rounded-2xl border border-slate-800/80 shadow-2xl space-y-5 my-auto">
                     <div class="mx-auto w-16 h-16 bg-blue-600/10 text-blue-500 rounded-2xl flex items-center justify-center border border-blue-500/20">
@@ -483,6 +502,49 @@
                     Mulai Gabungkan PDF
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: KOMPRES PDF -->
+    <div id="compress-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="file-down" class="text-amber-400"></i> Kompres PDF
+                </h3>
+                <button id="btn-close-compress" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Pilih target ukuran berkas. Semakin kecil targetnya, semakin kuat kompresinya.
+                Setiap halaman akan diubah menjadi gambar terkompresi untuk mencapai ukuran
+                tersebut, sehingga teks pada hasil akhir
+                <span class="text-amber-400 font-semibold">tidak lagi bisa disalin/dicari</span>
+                (paling cocok untuk dokumen hasil scan yang memang sudah berupa gambar).
+            </p>
+
+            <div class="grid grid-cols-2 gap-3">
+                <button data-target-bytes="1048576" data-target-label="1 MB" class="btn-compress-option bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-sm font-bold py-4 rounded-xl border border-slate-750 transition flex flex-col items-center gap-1.5">
+                    <i data-lucide="file-down" class="w-5 h-5"></i>
+                    Di bawah 1 MB
+                </button>
+                <button data-target-bytes="512000" data-target-label="500 KB" class="btn-compress-option bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-sm font-bold py-4 rounded-xl border border-slate-750 transition flex flex-col items-center gap-1.5">
+                    <i data-lucide="file-down" class="w-5 h-5"></i>
+                    Di bawah 500 KB
+                </button>
+                <button data-target-bytes="307200" data-target-label="300 KB" class="btn-compress-option bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-sm font-bold py-4 rounded-xl border border-slate-750 transition flex flex-col items-center gap-1.5">
+                    <i data-lucide="file-down" class="w-5 h-5"></i>
+                    Di bawah 300 KB
+                </button>
+                <button data-target-bytes="102400" data-target-label="100 KB" class="btn-compress-option bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-sm font-bold py-4 rounded-xl border border-slate-750 transition flex flex-col items-center gap-1.5">
+                    <i data-lucide="file-down" class="w-5 h-5"></i>
+                    Di bawah 100 KB
+                </button>
+            </div>
+
+            <p id="compress-current-size" class="text-[11px] text-slate-500 text-center"></p>
         </div>
     </div>
 
@@ -956,32 +1018,46 @@
         }
 
         // SCROLL SPY: MENDETEKSI HALAMAN AKTIF BERDASARKAN POSISI SCROLL VERTIKAL
+        // FIX PERFORMA: sebelumnya fungsi ini (yang memanggil getBoundingClientRect
+        // untuk SETIAP halaman PDF) langsung dijalankan di tiap event 'scroll'
+        // mentah -- padahal event scroll bisa menembak puluhan kali per detik.
+        // Pada dokumen dengan banyak halaman, itu jadi kerja berat yang berulang
+        // dan bikin scroll kerasa berat/nge-lag. Sekarang di-throttle dengan
+        // requestAnimationFrame supaya perhitungan ini paling banyak jalan
+        // sekali per frame render browser (idealnya ~60x/detik, bukan tanpa batas).
+        let scrollSpyTicking = false;
         function setupScrollSpy() {
             if (viewMode !== 'scroll') return;
 
             editorViewport.onscroll = () => {
-                const pageContainers = document.querySelectorAll('.pdf-page-container');
-                let activePage = currentPageNum;
-                let minDistance = Infinity;
+                if (scrollSpyTicking) return;
+                scrollSpyTicking = true;
 
-                pageContainers.forEach(container => {
-                    const rect = container.getBoundingClientRect();
+                requestAnimationFrame(() => {
+                    const pageContainers = document.querySelectorAll('.pdf-page-container');
+                    let activePage = currentPageNum;
+                    let minDistance = Infinity;
                     const viewportRect = editorViewport.getBoundingClientRect();
-                    
-                    // Hitung jarak tengah halaman ke tengah viewport area
-                    const containerCenter = rect.top + rect.height / 2;
-                    const viewportCenter = viewportRect.top + viewportRect.height / 2;
-                    const distance = Math.abs(containerCenter - viewportCenter);
 
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        activePage = parseInt(container.dataset.pageNum);
+                    pageContainers.forEach(container => {
+                        const rect = container.getBoundingClientRect();
+
+                        // Hitung jarak tengah halaman ke tengah viewport area
+                        const containerCenter = rect.top + rect.height / 2;
+                        const viewportCenter = viewportRect.top + viewportRect.height / 2;
+                        const distance = Math.abs(containerCenter - viewportCenter);
+
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            activePage = parseInt(container.dataset.pageNum);
+                        }
+                    });
+
+                    if (activePage !== currentPageNum) {
+                        setActivePage(activePage);
                     }
+                    scrollSpyTicking = false;
                 });
-
-                if (activePage !== currentPageNum) {
-                    setActivePage(activePage);
-                }
             };
         }
 
@@ -1499,6 +1575,15 @@
                 canvasObj.on('mouse:down', function(opt) {
                     if (activeTool !== 'whiteout') return;
                     const pointer = canvasObj.getPointer(opt.e);
+                    // FIX: sebelumnya border putus-putus (stroke + strokeDashArray)
+                    // dipakai sebagai indikator visual di editor, TAPI border ini
+                    // ikut ter-bake ke dalam PNG saat export (lihat proses export),
+                    // jadi ninggalin garis putus-putus tipis di sekitar area yang
+                    // ditutup -- terutama kelihatan kalau dipakai menutup watermark
+                    // di atas latar putih hasil scan. Solusinya: border dibuat
+                    // sebagai properti TERPISAH yang ditandai `excludeFromExport`,
+                    // lalu proses export mengosongkan stroke-nya sebelum di-render
+                    // ke PNG (lihat perubahan di bagian export).
                     const whiteBlock = new fabric.Rect({
                         left: pointer.x,
                         top: pointer.y,
@@ -1507,7 +1592,8 @@
                         fill: '#ffffff',
                         stroke: '#e2e8f0',
                         strokeWidth: 1,
-                        strokeDashArray: [4, 4]
+                        strokeDashArray: [4, 4],
+                        excludeStrokeFromExport: true
                     });
                     canvasObj.add(whiteBlock);
                     canvasObj.setActiveObject(whiteBlock);
@@ -1771,12 +1857,29 @@
             }
         });
 
-        // Hapus Objek Terpilih
+        // Hapus Objek Terpilih (menangani single object maupun multi-select)
+        function deleteActiveObject(canvas) {
+            const activeObj = canvas.getActiveObject();
+            if (!activeObj) return false;
+
+            if (activeObj.type === 'activeSelection') {
+                // FIX: canvas.remove(activeSelection) TIDAK benar-benar menghapus
+                // objek di dalamnya -- cuma membuang wrapper seleksinya, jadi
+                // objek asli tetap ada di canvas.getObjects() / toJSON() dan
+                // muncul lagi saat export. Solusinya: bongkar dulu grup-nya,
+                // baru hapus tiap objek asli satu per satu.
+                const objects = activeObj.getObjects();
+                canvas.discardActiveObject();
+                objects.forEach(obj => canvas.remove(obj));
+            } else {
+                canvas.remove(activeObj);
+            }
+            return true;
+        }
+
         document.getElementById('btn-delete-selected').addEventListener('click', () => {
             if (!fCanvas) return;
-            const activeObj = fCanvas.getActiveObject();
-            if (activeObj) {
-                fCanvas.remove(activeObj);
+            if (deleteActiveObject(fCanvas)) {
                 showToast("Objek terhapus!", "info");
             } else {
                 showToast("Pilih objek terlebih dahulu untuk dihapus.", "error");
@@ -1822,7 +1925,10 @@
                     activeObj.set('left', activeObj.left + moveAmount);
                     e.preventDefault();
                 } else if (e.key === 'Delete' || e.key === 'Backspace') {
-                    fCanvas.remove(activeObj);
+                    // FIX: pakai helper deleteActiveObject supaya multi-seleksi
+                    // (ActiveSelection) juga benar-benar terhapus dari canvas,
+                    // bukan cuma hilang secara visual.
+                    deleteActiveObject(fCanvas);
                     showToast("Objek terhapus!", "info");
                 }
                 
@@ -2085,6 +2191,34 @@
         // LOGIKA GABUNG BEBERAPA PDF (MERGE SYSTEM)
         let mergeFiles = [];
 
+        // TOGGLE DROPDOWN "ALAT HALAMAN" (klik untuk buka/tutup, bukan hover)
+        const pageToolsToggle = document.getElementById('btn-page-tools-toggle');
+        const pageToolsDropdown = document.getElementById('page-tools-dropdown');
+
+        pageToolsToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            pageToolsDropdown.classList.toggle('hidden');
+        });
+
+        // Tutup dropdown kalau user klik di luar area tombol/menu-nya
+        document.addEventListener('click', (e) => {
+            if (
+                !pageToolsDropdown.classList.contains('hidden') &&
+                !pageToolsDropdown.contains(e.target) &&
+                e.target !== pageToolsToggle &&
+                !pageToolsToggle.contains(e.target)
+            ) {
+                pageToolsDropdown.classList.add('hidden');
+            }
+        });
+
+        // Tutup dropdown otomatis begitu salah satu opsi di dalamnya diklik
+        ['btn-merge-modal', 'btn-split', 'btn-add-blank', 'btn-compress-modal'].forEach(id => {
+            document.getElementById(id).addEventListener('click', () => {
+                pageToolsDropdown.classList.add('hidden');
+            });
+        });
+
         document.getElementById('btn-merge-modal').addEventListener('click', () => {
             document.getElementById('merge-modal').classList.remove('hidden');
             renderMergeList();
@@ -2204,6 +2338,74 @@
             return bytes;
         }
 
+        // Membangun bytes PDF final dari dokumen asli + seluruh editan (rotasi
+        // halaman & objek Fabric yang di-flatten jadi PNG per halaman). Dipakai
+        // ulang oleh tombol Export MAUPUN fitur Kompres PDF, supaya keduanya
+        // selalu bekerja dari hasil edit yang sama & terbaru (single source of
+        // truth), tidak terpisah dua logic yang bisa saling berbeda.
+        async function buildFinalPdfBytes() {
+            const originalPdf = await PDFLib.PDFDocument.load(pdfDataBytes);
+            const finalPdf = await PDFLib.PDFDocument.create();
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (deletedPages.has(i)) continue;
+
+                const [copiedPage] = await finalPdf.copyPages(originalPdf, [i - 1]);
+                const { width, height } = copiedPage.getSize();
+
+                if (rotationStates[i] !== undefined && rotationStates[i] !== 0) {
+                    copiedPage.setRotation(PDFLib.degrees(rotationStates[i]));
+                }
+
+                if (pageObjectsCache[i]) {
+                    const tempCanvasEl = document.createElement('canvas');
+                    tempCanvasEl.width = width * 2;
+                    tempCanvasEl.height = height * 2;
+
+                    const tempFCanvas = new fabric.StaticCanvas(tempCanvasEl);
+
+                    await new Promise((resolve) => {
+                        tempFCanvas.loadFromJSON(pageObjectsCache[i], () => {
+                            // FIX: buang border putus-putus khusus editor (whiteout
+                            // tool) sebelum di-render ke PNG final, supaya yang
+                            // ter-export cuma bidang putih solidnya saja, bukan
+                            // garis dashed di sekelilingnya.
+                            tempFCanvas.getObjects().forEach(obj => {
+                                if (obj.excludeStrokeFromExport) {
+                                    obj.set({ stroke: null, strokeDashArray: null });
+                                }
+                            });
+                            tempFCanvas.setZoom(2.0);
+                            tempFCanvas.renderAll();
+                            resolve();
+                        });
+                    });
+
+                    const highResDataUrl = tempFCanvas.toDataURL({
+                        format: 'png',
+                        multiplier: 1.0
+                    });
+
+                    const pngBytes = dataURLToUint8Array(highResDataUrl);
+                    const pngImg = await finalPdf.embedPng(pngBytes);
+
+                    copiedPage.drawImage(pngImg, {
+                        x: 0,
+                        y: 0,
+                        width: width,
+                        height: height,
+                        opacity: 1.0
+                    });
+
+                    tempFCanvas.dispose();
+                }
+
+                finalPdf.addPage(copiedPage);
+            }
+
+            return await finalPdf.save();
+        }
+
         // PROSES EKSPOR FINAL (DENGAN TRANSPOSISI LAYER VECTOR)
         document.getElementById('btn-export').addEventListener('click', async () => {
             if (!pdfDataBytes) return;
@@ -2212,57 +2414,7 @@
             showToast("Mengekspor file PDF final...", "info");
 
             try {
-                const originalPdf = await PDFLib.PDFDocument.load(pdfDataBytes);
-                const finalPdf = await PDFLib.PDFDocument.create();
-
-                for (let i = 1; i <= totalPages; i++) {
-                    if (deletedPages.has(i)) continue;
-
-                    const [copiedPage] = await finalPdf.copyPages(originalPdf, [i - 1]);
-                    const { width, height } = copiedPage.getSize();
-
-                    if (rotationStates[i] !== undefined && rotationStates[i] !== 0) {
-                        copiedPage.setRotation(PDFLib.degrees(rotationStates[i]));
-                    }
-
-                    if (pageObjectsCache[i]) {
-                        const tempCanvasEl = document.createElement('canvas');
-                        tempCanvasEl.width = width * 2;
-                        tempCanvasEl.height = height * 2;
-                        
-                        const tempFCanvas = new fabric.StaticCanvas(tempCanvasEl);
-                        
-                        await new Promise((resolve) => {
-                            tempFCanvas.loadFromJSON(pageObjectsCache[i], () => {
-                                tempFCanvas.setZoom(2.0);
-                                tempFCanvas.renderAll();
-                                resolve();
-                            });
-                        });
-
-                        const highResDataUrl = tempFCanvas.toDataURL({
-                            format: 'png',
-                            multiplier: 1.0
-                        });
-
-                        const pngBytes = dataURLToUint8Array(highResDataUrl);
-                        const pngImg = await finalPdf.embedPng(pngBytes);
-                        
-                        copiedPage.drawImage(pngImg, {
-                            x: 0,
-                            y: 0,
-                            width: width,
-                            height: height,
-                            opacity: 1.0
-                        });
-
-                        tempFCanvas.dispose();
-                    }
-
-                    finalPdf.addPage(copiedPage);
-                }
-
-                const finalBytes = await finalPdf.save();
+                const finalBytes = await buildFinalPdfBytes();
                 triggerDownload(finalBytes, `PDF_Editor_Pro_${Date.now()}.pdf`);
                 showToast("File berhasil disimpan!", "success");
 
@@ -2274,6 +2426,145 @@
                 const detail = err && err.message ? err.message : String(err);
                 showToast(`Gagal menyimpan PDF: ${detail}`, "error");
             }
+        });
+
+        // ================== FITUR: KOMPRES PDF KE TARGET UKURAN ==================
+        // Strategi: dokumen final (hasil buildFinalPdfBytes, sudah termasuk semua
+        // editan) dirender ulang halaman-per-halaman jadi gambar JPEG, lalu
+        // disusun jadi PDF baru dari gambar-gambar terkompresi tsb. Dicoba
+        // berurutan dari preset paling ringan (kualitas terbaik) ke paling
+        // agresif, berhenti begitu ukurannya sudah di bawah target -- supaya
+        // kualitas yang dipakai adalah yang PALING BAGUS yang masih memenuhi
+        // target, bukan langsung yang paling jelek.
+        const COMPRESSION_PRESETS = [
+            { scale: 1.5, quality: 0.75 },
+            { scale: 1.3, quality: 0.6 },
+            { scale: 1.1, quality: 0.5 },
+            { scale: 1.0, quality: 0.4 },
+            { scale: 0.9, quality: 0.35 },
+            { scale: 0.75, quality: 0.3 },
+            { scale: 0.6, quality: 0.25 },
+            { scale: 0.5, quality: 0.2 }
+        ];
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+        }
+
+        // Render setiap halaman dari `sourceBytes` jadi JPEG pada skala &
+        // kualitas tertentu, lalu susun jadi PDF baru. Ukuran halaman OUTPUT
+        // tetap disamakan dengan ukuran asli (viewport scale=1) supaya dimensi
+        // cetak/tampil tidak berubah -- hanya resolusi gambar & kualitas JPEG
+        // yang diturunkan untuk memperkecil ukuran berkas.
+        async function rasterizeAndBuildCompressedPdf(sourceBytes, renderScale, jpegQuality) {
+            const loadingTask = pdfjsLib.getDocument({ data: sourceBytes.slice() });
+            const srcDoc = await loadingTask.promise;
+            const numPages = srcDoc.numPages;
+
+            const outDoc = await PDFLib.PDFDocument.create();
+
+            for (let i = 1; i <= numPages; i++) {
+                const page = await srcDoc.getPage(i);
+                const viewport1x = page.getViewport({ scale: 1 });
+                const renderViewport = page.getViewport({ scale: renderScale });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(renderViewport.width));
+                canvas.height = Math.max(1, Math.round(renderViewport.height));
+                const ctx = canvas.getContext('2d');
+
+                // JPEG tidak mendukung transparansi -- isi latar putih dulu supaya
+                // area transparan (kalau ada) tidak berubah jadi hitam saat di-
+                // convert ke JPEG.
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+
+                const jpegDataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
+                const jpegBytes = dataURLToUint8Array(jpegDataUrl);
+                const jpegImage = await outDoc.embedJpg(jpegBytes);
+
+                const outPage = outDoc.addPage([viewport1x.width, viewport1x.height]);
+                outPage.drawImage(jpegImage, {
+                    x: 0,
+                    y: 0,
+                    width: viewport1x.width,
+                    height: viewport1x.height
+                });
+            }
+
+            return await outDoc.save();
+        }
+
+        async function compressPdfToTarget(targetBytes, targetLabel) {
+            if (!pdfDataBytes) return;
+
+            saveCurrentPageObjects();
+            document.getElementById('compress-modal').classList.add('hidden');
+            showToast(`Menyiapkan dokumen untuk dikompres...`, "info");
+
+            try {
+                const baseBytes = await buildFinalPdfBytes();
+
+                // Kalau dokumen (dengan semua editan) sudah di bawah target,
+                // tidak perlu dikompres sama sekali -- langsung pakai versi ini
+                // supaya kualitasnya tetap maksimal (utuh, bukan gambar).
+                if (baseBytes.byteLength <= targetBytes) {
+                    triggerDownload(baseBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
+                    showToast(`Ukuran dokumen sudah di bawah ${targetLabel}, tidak perlu dikompres!`, "success");
+                    return;
+                }
+
+                let bestResult = null;
+                for (let idx = 0; idx < COMPRESSION_PRESETS.length; idx++) {
+                    const preset = COMPRESSION_PRESETS[idx];
+                    showToast(`Mengompres... mencoba level ${idx + 1}/${COMPRESSION_PRESETS.length}`, "info");
+
+                    const compressedBytes = await rasterizeAndBuildCompressedPdf(baseBytes, preset.scale, preset.quality);
+                    bestResult = compressedBytes;
+
+                    if (compressedBytes.byteLength <= targetBytes) {
+                        triggerDownload(compressedBytes, `PDF_Compressed_${targetLabel.replace(' ', '')}_${Date.now()}.pdf`);
+                        showToast(`Berhasil dikompres jadi ${formatBytes(compressedBytes.byteLength)} (target ${targetLabel})!`, "success");
+                        return;
+                    }
+                }
+
+                // Tidak ada preset yang berhasil mencapai target walau sudah
+                // paling agresif -- tetap unduhkan hasil terkecil yang berhasil
+                // dibuat sebagai upaya terbaik, dan beri tahu user secara jujur.
+                triggerDownload(bestResult, `PDF_Compressed_Terbaik_${Date.now()}.pdf`);
+                showToast(`Tidak berhasil mencapai ${targetLabel} tanpa kualitas terlalu rusak. File terkecil yang berhasil dibuat: ${formatBytes(bestResult.byteLength)}`, "error");
+            } catch (err) {
+                console.error(err);
+                const detail = err && err.message ? err.message : String(err);
+                showToast(`Gagal mengompres PDF: ${detail}`, "error");
+            }
+        }
+
+        document.getElementById('btn-compress-modal').addEventListener('click', () => {
+            if (!pdfDataBytes) {
+                showToast("Buka berkas PDF terlebih dahulu.", "error");
+                return;
+            }
+            document.getElementById('compress-modal').classList.remove('hidden');
+            document.getElementById('compress-current-size').innerText =
+                `Ukuran dokumen saat ini: ${formatBytes(pdfDataBytes.byteLength)}`;
+        });
+
+        document.getElementById('btn-close-compress').addEventListener('click', () => {
+            document.getElementById('compress-modal').classList.add('hidden');
+        });
+
+        document.querySelectorAll('.btn-compress-option').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetBytes = parseInt(btn.dataset.targetBytes, 10);
+                const targetLabel = btn.dataset.targetLabel;
+                compressPdfToTarget(targetBytes, targetLabel);
+            });
         });
 
         // Helper Download Berkas
