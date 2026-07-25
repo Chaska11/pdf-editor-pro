@@ -128,6 +128,9 @@
                     <button id="btn-compress-modal" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
                         <i data-lucide="file-down" class="w-4 h-4 text-amber-400"></i> Kompres PDF
                     </button>
+                    <button id="btn-image2pdf-modal" class="w-full text-left px-4 py-2.5 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-2">
+                        <i data-lucide="image-plus" class="w-4 h-4 text-emerald-400"></i> Gambar ke PDF
+                    </button>
                 </div>
             </div>
 
@@ -545,6 +548,52 @@
             </div>
 
             <p id="compress-current-size" class="text-[11px] text-slate-500 text-center"></p>
+        </div>
+    </div>
+
+    <!-- MODAL 4: GAMBAR KE PDF -->
+    <div id="image2pdf-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i data-lucide="image-plus" class="text-emerald-400"></i> Gambar ke PDF
+                </h3>
+                <button id="btn-close-image2pdf" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-400">Pilih satu atau beberapa gambar (JPG, PNG, WEBP, dll). Tiap gambar akan menjadi satu halaman PDF, dengan opsi kompresi supaya ukurannya lebih kecil.</p>
+
+            <div id="image2pdf-files-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                <div class="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
+                    Belum ada gambar terpilih.
+                </div>
+            </div>
+
+            <label class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs py-3 rounded-xl text-center cursor-pointer transition flex items-center justify-center gap-2 border border-slate-750 font-semibold">
+                <i data-lucide="plus" class="w-4 h-4"></i> Pilih Gambar
+                <input type="file" id="image2pdf-file-picker" accept="image/*" multiple class="hidden">
+            </label>
+
+            <div class="flex items-center justify-between gap-3">
+                <label class="text-xs text-slate-400 font-semibold">Tingkat Kompresi</label>
+                <select id="image2pdf-quality" class="bg-slate-800 border border-slate-750 text-slate-200 rounded-lg text-xs px-2 py-1.5 focus:outline-none">
+                    <option value="1.0">Tanpa Kompresi (kualitas asli)</option>
+                    <option value="0.8" selected>Ringan (kualitas tinggi)</option>
+                    <option value="0.6">Sedang</option>
+                    <option value="0.4">Kuat (ukuran terkecil)</option>
+                </select>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                <button id="btn-cancel-image2pdf" class="bg-slate-950 text-slate-400 text-xs px-4 py-2.5 rounded-lg transition">
+                    Batal
+                </button>
+                <button id="btn-run-image2pdf" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white text-xs px-5 py-2.5 rounded-lg transition font-bold flex items-center gap-2 shadow-lg">
+                    Buat PDF dari Gambar
+                </button>
+            </div>
         </div>
     </div>
 
@@ -2188,7 +2237,161 @@
         });
 
 
-        // LOGIKA GABUNG BEBERAPA PDF (MERGE SYSTEM)
+        // ================== FITUR: GAMBAR KE PDF ==================
+        let image2pdfFiles = []; // { name, dataUrl }
+
+        document.getElementById('btn-image2pdf-modal').addEventListener('click', () => {
+            document.getElementById('image2pdf-modal').classList.remove('hidden');
+        });
+        document.getElementById('btn-close-image2pdf').addEventListener('click', closeImage2PdfModal);
+        document.getElementById('btn-cancel-image2pdf').addEventListener('click', closeImage2PdfModal);
+
+        function closeImage2PdfModal() {
+            document.getElementById('image2pdf-modal').classList.add('hidden');
+        }
+
+        document.getElementById('image2pdf-file-picker').addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (!files.length) return;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+                reader.onload = function() {
+                    image2pdfFiles.push({ name: file.name, dataUrl: this.result });
+                    renderImage2PdfList();
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function renderImage2PdfList() {
+            const container = document.getElementById('image2pdf-files-list');
+            const runBtn = document.getElementById('btn-run-image2pdf');
+
+            if (image2pdfFiles.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs">
+                        Belum ada gambar terpilih.
+                    </div>
+                `;
+                runBtn.setAttribute('disabled', 'true');
+                return;
+            }
+
+            container.innerHTML = '';
+            image2pdfFiles.forEach((file, index) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between p-2 bg-slate-950 rounded-xl border border-slate-800 text-xs gap-2';
+                row.innerHTML = `
+                    <div class="flex items-center gap-2 truncate">
+                        <img src="${file.dataUrl}" class="w-8 h-8 object-cover rounded border border-slate-800 shrink-0" />
+                        <span class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md font-mono shrink-0">${index + 1}</span>
+                        <p class="truncate text-slate-300 font-semibold">${file.name}</p>
+                    </div>
+                    <button onclick="removeImage2PdfFile(${index})" class="text-rose-500 hover:text-rose-400 p-1 shrink-0">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                container.appendChild(row);
+            });
+
+            lucide.createIcons();
+            runBtn.removeAttribute('disabled');
+        }
+
+        window.removeImage2PdfFile = function(index) {
+            image2pdfFiles.splice(index, 1);
+            renderImage2PdfList();
+        };
+
+        function loadImageElement(dataUrl) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = dataUrl;
+            });
+        }
+
+        // Ukuran halaman A4 (dalam points, 1pt = 1/72 inci) supaya konsisten
+        // dengan halaman kosong lain di aplikasi ini (lihat fitur Sisipkan
+        // Halaman Kosong yang juga memakai 595x842).
+        const A4_WIDTH = 595;
+        const A4_HEIGHT = 842;
+        const A4_MARGIN = 24;
+        // Batas resolusi maksimum sebelum gambar di-embed -- supaya foto
+        // beresolusi sangat besar (mis. hasil kamera HP modern, 4000px+) tidak
+        // bikin PDF membengkak walau user memilih "Tanpa Kompresi".
+        const IMAGE_MAX_DIMENSION = 2000;
+
+        document.getElementById('btn-run-image2pdf').addEventListener('click', async () => {
+            if (image2pdfFiles.length === 0) return;
+
+            const quality = parseFloat(document.getElementById('image2pdf-quality').value);
+            const filesToConvert = image2pdfFiles;
+            closeImage2PdfModal();
+            showToast(`Mengonversi ${filesToConvert.length} gambar menjadi PDF...`, "info");
+
+            try {
+                const outDoc = await PDFLib.PDFDocument.create();
+
+                for (const file of filesToConvert) {
+                    const imgEl = await loadImageElement(file.dataUrl);
+
+                    let drawW = imgEl.naturalWidth;
+                    let drawH = imgEl.naturalHeight;
+                    if (Math.max(drawW, drawH) > IMAGE_MAX_DIMENSION) {
+                        const ratio = IMAGE_MAX_DIMENSION / Math.max(drawW, drawH);
+                        drawW = Math.round(drawW * ratio);
+                        drawH = Math.round(drawH * ratio);
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = drawW;
+                    canvas.height = drawH;
+                    const ctx = canvas.getContext('2d');
+                    // JPEG tidak mendukung transparansi -- isi latar putih dulu
+                    // supaya PNG dengan area transparan tidak berubah jadi hitam.
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, drawW, drawH);
+                    ctx.drawImage(imgEl, 0, 0, drawW, drawH);
+
+                    const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+                    const jpegBytes = dataURLToUint8Array(jpegDataUrl);
+                    const jpegImage = await outDoc.embedJpg(jpegBytes);
+
+                    // Hitung ukuran gambar supaya PAS (fit, tidak terpotong) di
+                    // dalam halaman A4 dengan margin, lalu posisikan di tengah.
+                    const availW = A4_WIDTH - A4_MARGIN * 2;
+                    const availH = A4_HEIGHT - A4_MARGIN * 2;
+                    const fitRatio = Math.min(availW / drawW, availH / drawH, 1);
+                    const finalW = drawW * fitRatio;
+                    const finalH = drawH * fitRatio;
+
+                    const page = outDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+                    page.drawImage(jpegImage, {
+                        x: (A4_WIDTH - finalW) / 2,
+                        y: (A4_HEIGHT - finalH) / 2,
+                        width: finalW,
+                        height: finalH
+                    });
+                }
+
+                const outBytes = await outDoc.save();
+                image2pdfFiles = [];
+                renderImage2PdfList();
+
+                const saved = await saveOrDownloadFile(outBytes, `Gambar_ke_PDF_${Date.now()}.pdf`);
+                if (saved) {
+                    showToast("Gambar berhasil dikonversi menjadi PDF!", "success");
+                }
+            } catch (err) {
+                console.error(err);
+                const detail = err && err.message ? err.message : String(err);
+                showToast(`Gagal mengonversi gambar ke PDF: ${detail}`, "error");
+            }
+        });
         let mergeFiles = [];
 
         // TOGGLE DROPDOWN "ALAT HALAMAN" (klik untuk buka/tutup, bukan hover)
@@ -2213,7 +2416,7 @@
         });
 
         // Tutup dropdown otomatis begitu salah satu opsi di dalamnya diklik
-        ['btn-merge-modal', 'btn-split', 'btn-add-blank', 'btn-compress-modal'].forEach(id => {
+        ['btn-merge-modal', 'btn-split', 'btn-add-blank', 'btn-compress-modal', 'btn-image2pdf-modal'].forEach(id => {
             document.getElementById(id).addEventListener('click', () => {
                 pageToolsDropdown.classList.add('hidden');
             });
